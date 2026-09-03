@@ -112,6 +112,40 @@ def _run_checks(dir: Path, ports: list[int] | None = None, need_openssl: bool = 
         console.print(f"[{style}]{icon}[/] {result.name}: {result.detail}")
         ok = ok and result.ok
     return ok
+def _resolve_ports_and_base_url(
+    base_url: str, tls_mode: str, is_localhost: bool
+) -> tuple[str, list[int]]:
+    if tls_mode == "standalone":
+        return base_url, [80, 443]
+
+    default_port = 8080 if tls_mode == "behind-proxy" else 80
+    parsed = urlparse(base_url)
+    port = parsed.port or default_port
+
+    if tls_mode == "none" and is_localhost and port == 80 and checks.is_port_in_use(443):
+        console.print(
+            "[yellow]⚠ Port 443 ist auf localhost belegt — "
+            "Browser könnten http://localhost automatisch auf diesen Dienst umleiten.[/]"
+        )
+        if Confirm.ask("Anderen Port wählen (z. B. 8080)?", default=True):
+            new_port = int(Prompt.ask("Port", default="8080"))
+            host = parsed.hostname or "localhost"
+            base_url = f"{parsed.scheme or 'http'}://{host}:{new_port}"
+            return base_url, [new_port]
+
+    if checks.is_port_in_use(port):
+        console.print(f"[yellow]⚠ Port {port} ist bereits belegt.[/]")
+        if Confirm.ask("Anderen Port wählen?", default=True):
+            alt_default = "8080" if port != 8080 else "8081"
+            new_port = int(Prompt.ask("Port", default=alt_default))
+            host = parsed.hostname or "localhost"
+            scheme = parsed.scheme or "http"
+            base_url = f"{scheme}://{host}:{new_port}"
+            return base_url, [new_port]
+
+    return base_url, [port]
+
+
 
 
 @app.command()
@@ -149,8 +183,8 @@ def install(
     tls_mode = Prompt.ask("TLS-Modus", choices=list(TLS_CHOICES), default="none" if is_localhost else "standalone")
 
     console.print()
+    base_url, ports = _resolve_ports_and_base_url(base_url, tls_mode, is_localhost)
     console.rule("Preflight-Checks")
-    ports = [80, 443] if tls_mode == "standalone" else None
     if not _run_checks(dir, ports=ports, need_openssl=tls_mode == "standalone"):
         console.print("[red]Abgebrochen — Check fehlgeschlagen.[/]")
         raise typer.Exit(1)
@@ -196,7 +230,11 @@ def install(
         f"Instanzspezifische compose-Overrides: [bold]{dir / 'compose.override.yaml.example'}[/] "
         "nach compose.override.yaml umbenennen."
     )
-    console.print("Starten mit: [bold]katalon start --dir " + str(dir) + "[/]")
+    console.print()
+    if Confirm.ask("Stack jetzt starten?", default=True):
+        start(dir=dir)
+    else:
+        console.print(f"Starten mit: [bold]katalon start --dir {dir}[/]")
 
 
 def _env_value(dir: Path, key: str) -> str | None:
@@ -291,13 +329,41 @@ def doctor(dir: Path = typer.Option(DEFAULT_DIR, "--dir")):
     docker.compose(dir, "ps")
 
 
-@app.command()
-def backup(dir: Path = typer.Option(DEFAULT_DIR, "--dir")):
-    """Manuelles Backup (Postgres-Dump + .env + installation.json)."""
-    instance_dir_or_raise(dir)
-    path = backup_mod.create_backup(dir)
-    console.print(f"[green]✔[/] Backup erstellt: {path}")
+def _ensure_db_running(dir: Path, yes: bool = False) -> None:
+    if docker.is_running(dir, "db"):
+        return
+    console.print("[yellow]⚠ Datenbank-Container ('db') läuft nicht.[/]")
+    if not yes and not Confirm.ask("Datenbank-Container ('db') jetzt starten?"):
+        console.print("[red]✖ Abbruch: Für diese Aktion muss die Datenbank laufen.[/]")
+        raise typer.Exit(1)
+    console.print("Starte Datenbank-Container …")
+    docker.compose(dir, "up", "-d", "db")
+    if not docker.wait_for_db(dir):
+        console.print("[red]✖ Datenbank konnte nicht rechtzeitig gestartet werden.[/]")
+        raise typer.Exit(1)
+    console.print("[green]✔[/] Datenbank läuft.")
 
+
+@app.command()
+def doctor(dir: Path = typer.Option(DEFAULT_DIR, "--dir")):
+    """Diagnose: Docker, Diskspace, Compose-Status."""
+    _run_checks(dir)
+    try:
+        instance_dir_or_raise(dir)
+    except FileNotFoundError:
+        return
+    state = InstallationState.load(dir)
+    if (
+        state.tls_mode == "none"
+        and "localhost" in state.base_url
+        and urlparse(state.base_url).port in (None, 80)
+        and checks.is_port_in_use(443)
+    ):
+        console.print(
+            "[yellow]⚠ Hinweis: Port 443 ist belegt. Falls Browser http://localhost/admin/ "
+            "auf https:// umleiten, Base-URL auf z. B. http://localhost:8080 anpassen.[/]"
+        )
+    docker.compose(dir, "ps")
 
 @app.command()
 def update(
@@ -332,6 +398,8 @@ def update(
 
     if not yes and not Confirm.ask("Update durchführen?"):
         raise typer.Exit(0)
+    _ensure_db_running(dir, yes=yes)
+
 
     steps = [
         ("Backup erstellen", lambda: backup_mod.create_backup(dir)),
@@ -390,6 +458,8 @@ def rollback(
     console.print(f"[yellow]⚠[/] Rollback auf Backup {backup_dir.name} — Daten seit diesem Backup gehen verloren.")
     if not yes and not Confirm.ask("Fortfahren?"):
         raise typer.Exit(0)
+    _ensure_db_running(dir, yes=yes)
+
 
     state = InstallationState.load(dir)
     previous = state.previous()
@@ -420,10 +490,16 @@ def rollback(
 def main() -> None:
     try:
         app()
-    except (FileNotFoundError, docker.DockerError, backup_mod.BackupError, subprocess.CalledProcessError) as exc:
+    except (FileNotFoundError, docker.DockerError, backup_mod.BackupError) as exc:
         console.print(f"[red]✖[/] {exc}")
         raise SystemExit(1) from exc
-
+    except subprocess.CalledProcessError as exc:
+        err = (exc.stderr or "").strip()
+        if err:
+            console.print(f"[red]✖[/] {exc}\n[red]{err}[/]")
+        else:
+            console.print(f"[red]✖[/] {exc}")
+        raise SystemExit(1) from exc
 
 if __name__ == "__main__":
     main()

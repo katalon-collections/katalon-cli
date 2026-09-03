@@ -22,14 +22,17 @@ def render_compose(
     tls_mode: str,
     registry: str = "ghcr.io/katalon-collections/katalon",
 ) -> str:
+    from urllib.parse import urlparse
+
+    parsed_port = urlparse(base_url).port
     template = _env.get_template("compose.yaml.j2")
     return template.render(
         version=version,
         base_url=base_url,
         tls_mode=tls_mode,
         registry=registry,
+        port=parsed_port,
     )
-
 
 def render_nginx_conf(*, tls_mode: str) -> str:
     template = _env.get_template("nginx.conf.j2")

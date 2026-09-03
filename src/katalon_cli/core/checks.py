@@ -48,13 +48,14 @@ def check_openssl() -> CheckResult:
     return CheckResult("OpenSSL", True, "gefunden")
 
 
+def is_port_in_use(port: int) -> bool:
+    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
+        s.settimeout(0.5)
+        return s.connect_ex(("127.0.0.1", port)) == 0
+
+
 def check_ports(ports: list[int]) -> CheckResult:
-    busy = []
-    for port in ports:
-        with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
-            s.settimeout(0.5)
-            if s.connect_ex(("127.0.0.1", port)) == 0:
-                busy.append(port)
+    busy = [port for port in ports if is_port_in_use(port)]
     if busy:
         return CheckResult("Ports", False, f"belegt: {', '.join(map(str, busy))}")
     return CheckResult("Ports", True, f"frei: {', '.join(map(str, ports))}")

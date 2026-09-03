@@ -96,6 +96,7 @@ services:
     environment:
       DATABASE_URL: postgresql+asyncpg://${POSTGRES_USER:-katalon}:${POSTGRES_PASSWORD}@db:5432/${POSTGRES_DB:-katalon}
       REDIS_URL: ${REDIS_URL:-redis://redis:6379/0}
+      ELASTICSEARCH_URL: ${ELASTICSEARCH_URL:-http://elasticsearch:9200}
       CANTALOUPE_URL: ${CANTALOUPE_URL:-http://cantaloupe:8182}
       CANTALOUPE_PUBLIC_URL: ${CANTALOUPE_PUBLIC_URL:-http://localhost}
       MEDIA_ROOT: /var/lib/katalon/media
@@ -115,6 +116,7 @@ services:
     environment:
       DATABASE_URL: postgresql+asyncpg://${POSTGRES_USER:-katalon}:${POSTGRES_PASSWORD}@db:5432/${POSTGRES_DB:-katalon}
       REDIS_URL: ${REDIS_URL:-redis://redis:6379/0}
+      ELASTICSEARCH_URL: ${ELASTICSEARCH_URL:-http://elasticsearch:9200}
       CANTALOUPE_URL: ${CANTALOUPE_URL:-http://cantaloupe:8182}
       CANTALOUPE_PUBLIC_URL: ${CANTALOUPE_PUBLIC_URL:-http://localhost}
     depends_on:
@@ -159,9 +161,9 @@ services:
       - "80:80"
       - "443:443"
 {% elif tls_mode == "behind-proxy" %}
-      - "127.0.0.1:8080:80"
+      - "127.0.0.1:{{ port or 8080 }}:80"
 {% else %}
-      - "80:80"
+      - "{{ port or 80 }}:80"
 {% endif %}
     depends_on:
       api: { condition: service_healthy }

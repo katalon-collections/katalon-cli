@@ -4,8 +4,8 @@ from __future__ import annotations
 
 import shutil
 import subprocess
+import time
 from pathlib import Path
-
 
 class DockerError(RuntimeError):
     pass
@@ -50,3 +50,27 @@ def is_healthy(instance_dir: Path, service: str = "api") -> bool:
         instance_dir, "ps", "--format", "json", service, check=False, capture=True
     )
     return result.returncode == 0 and '"Health":"healthy"' in (result.stdout or "")
+
+
+def is_running(instance_dir: Path, service: str = "db") -> bool:
+    result = compose(
+        instance_dir, "ps", "--status", "running", "-q", service, check=False, capture=True
+    )
+    return result.returncode == 0 and bool(result.stdout.strip())
+
+
+def wait_for_db(instance_dir: Path, timeout: int = 30) -> bool:
+    for _ in range(timeout):
+        result = compose(
+            instance_dir,
+            "exec",
+            "-T",
+            "db",
+            "pg_isready",
+            check=False,
+            capture=True,
+        )
+        if result.returncode == 0:
+            return True
+        time.sleep(1)
+    return False
