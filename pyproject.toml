@@ -1,0 +1,28 @@
+[project]
+name = "katalon-cli"
+version = "0.1.3"
+description = "Installer & Updater CLI für Katalon Production-Instanzen"
+readme = "README.md"
+authors = [
+    { name = "Karl Krägelin", email = "karlkraegelin@gmail.com" }
+]
+requires-python = ">=3.12"
+dependencies = [
+    "typer>=0.15",
+    "rich>=13.9",
+    "httpx>=0.28",
+    "pydantic>=2.9",
+    "jinja2>=3.1",
+]
+
+[project.scripts]
+katalon = "katalon_cli.main:main"
+
+[build-system]
+requires = ["uv_build>=0.12.3,<0.13.0"]
+build-backend = "uv_build"
+
+[dependency-groups]
+dev = [
+    "pytest>=8.3",
+]

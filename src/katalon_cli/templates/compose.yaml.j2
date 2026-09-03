@@ -1,0 +1,173 @@
+services:
+  db:
+    image: postgis/postgis:16-3.4
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-katalon}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      POSTGRES_DB: ${POSTGRES_DB:-katalon}
+    volumes:
+      - db_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-katalon}"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  redis:
+    image: redis:7-alpine
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  elasticsearch:
+    image: docker.elastic.co/elasticsearch/elasticsearch:8.13.4
+    restart: unless-stopped
+    environment:
+      discovery.type: single-node
+      xpack.security.enabled: "false"
+      ES_JAVA_OPTS: "-Xms${ES_HEAP_SIZE:-512m} -Xmx${ES_HEAP_SIZE:-512m}"
+    volumes:
+      - es_data:/usr/share/elasticsearch/data
+    healthcheck:
+      test: ["CMD-SHELL", "curl -sf http://localhost:9200/_cluster/health | grep -v red"]
+      interval: 15s
+      timeout: 10s
+      retries: 20
+
+  cantaloupe:
+    image: islandora/cantaloupe:main
+    restart: unless-stopped
+    volumes:
+      - ${MEDIA_ROOT:-./media}:/var/lib/cantaloupe/images:ro
+      - type: tmpfs
+        target: /var/lib/cantaloupe/cache
+        tmpfs:
+          size: ${CANTALOUPE_CACHE_TMPFS_SIZE:-512m}
+    environment:
+      CANTALOUPE_SOURCE_STATIC: FilesystemSource
+      CANTALOUPE_FILESYSTEMSOURCE_LOOKUP_STRATEGY: BasicLookupStrategy
+      CANTALOUPE_FILESYSTEMSOURCE_BASICLOOKUPSTRATEGY_PATH_PREFIX: /var/lib/cantaloupe/images/
+      CANTALOUPE_BASE_URI: ${CANTALOUPE_PUBLIC_URL:-http://localhost}
+      CANTALOUPE_CACHE_SERVER_DERIVATIVE: FilesystemCache
+      CANTALOUPE_CACHE_SERVER_DERIVATIVE_ENABLED: "true"
+      CANTALOUPE_FILESYSTEMCACHE_PATHNAME: /var/lib/cantaloupe/cache
+      CANTALOUPE_PROCESSOR_MANUALSELECTIONSTRATEGY_JPG: Java2dProcessor
+    healthcheck:
+      test: ["CMD-SHELL", "curl -sf http://localhost:8182/iiif/3"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+
+  api:
+    image: {{ registry }}-api:{{ version }}
+    platform: linux/amd64
+    restart: unless-stopped
+    env_file: .env
+    environment:
+      DATABASE_URL: postgresql+asyncpg://${POSTGRES_USER:-katalon}:${POSTGRES_PASSWORD}@db:5432/${POSTGRES_DB:-katalon}
+      REDIS_URL: ${REDIS_URL:-redis://redis:6379/0}
+      ELASTICSEARCH_URL: ${ELASTICSEARCH_URL:-http://elasticsearch:9200}
+      CANTALOUPE_URL: ${CANTALOUPE_URL:-http://cantaloupe:8182}
+      CANTALOUPE_PUBLIC_URL: ${CANTALOUPE_PUBLIC_URL:-http://localhost}
+      MEDIA_ROOT: /var/lib/katalon/media
+      FIRST_RUN_CREDENTIALS_PATH: ${FIRST_RUN_CREDENTIALS_PATH:-/var/lib/katalon/first-run-credentials.txt}
+      DEBUG: "false"
+    volumes:
+      - ${MEDIA_ROOT:-./media}:/var/lib/katalon/media
+    depends_on:
+      db: { condition: service_healthy }
+      redis: { condition: service_healthy }
+      cantaloupe: { condition: service_healthy }
+    healthcheck:
+      test: ["CMD", "curl", "-sf", "http://localhost:8000/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+
+  worker:
+    image: {{ registry }}-worker:{{ version }}
+    platform: linux/amd64
+    restart: unless-stopped
+    env_file: .env
+    environment:
+      DATABASE_URL: postgresql+asyncpg://${POSTGRES_USER:-katalon}:${POSTGRES_PASSWORD}@db:5432/${POSTGRES_DB:-katalon}
+      REDIS_URL: ${REDIS_URL:-redis://redis:6379/0}
+      CANTALOUPE_URL: ${CANTALOUPE_URL:-http://cantaloupe:8182}
+      CANTALOUPE_PUBLIC_URL: ${CANTALOUPE_PUBLIC_URL:-http://localhost}
+      MEDIA_ROOT: /var/lib/katalon/media
+    volumes:
+      - ${MEDIA_ROOT:-./media}:/var/lib/katalon/media
+    depends_on:
+      db: { condition: service_healthy }
+      redis: { condition: service_healthy }
+      cantaloupe: { condition: service_healthy }
+
+  beat:
+    image: {{ registry }}-worker:{{ version }}
+    platform: linux/amd64
+    restart: unless-stopped
+    command: ["celery", "-A", "katalon.workers.celery_app", "beat", "--loglevel=info"]
+    env_file: .env
+    environment:
+      DATABASE_URL: postgresql+asyncpg://${POSTGRES_USER:-katalon}:${POSTGRES_PASSWORD}@db:5432/${POSTGRES_DB:-katalon}
+      REDIS_URL: ${REDIS_URL:-redis://redis:6379/0}
+      CANTALOUPE_URL: ${CANTALOUPE_URL:-http://cantaloupe:8182}
+      CANTALOUPE_PUBLIC_URL: ${CANTALOUPE_PUBLIC_URL:-http://localhost}
+    depends_on:
+      db: { condition: service_healthy }
+      redis: { condition: service_healthy }
+      cantaloupe: { condition: service_healthy }
+
+  admin:
+    image: {{ registry }}-admin:{{ version }}
+    platform: linux/amd64
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD-SHELL", "wget -q -O- http://127.0.0.1/index.html > /dev/null 2>&1 || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+    depends_on:
+      api: { condition: service_healthy }
+
+  portal:
+    image: {{ registry }}-portal:{{ version }}
+    platform: linux/amd64
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD-SHELL", "wget -q -O- http://127.0.0.1/index.html > /dev/null 2>&1 || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+    depends_on:
+      api: { condition: service_healthy }
+
+  nginx:
+    image: nginx:alpine
+    restart: unless-stopped
+    volumes:
+      - ./nginx.conf:/etc/nginx/conf.d/default.conf:ro
+{% if tls_mode == "standalone" %}
+      - ./certs:/etc/nginx/certs:ro
+{% endif %}
+    ports:
+{% if tls_mode == "standalone" %}
+      - "80:80"
+      - "443:443"
+{% elif tls_mode == "behind-proxy" %}
+      - "127.0.0.1:8080:80"
+{% else %}
+      - "80:80"
+{% endif %}
+    depends_on:
+      api: { condition: service_healthy }
+      admin: { condition: service_healthy }
+      portal: { condition: service_healthy }
+
+volumes:
+  db_data:
+  es_data:
