@@ -1,7 +1,7 @@
 """katalon — Installer & Updater CLI für Production-Instanzen."""
 
 from __future__ import annotations
-
+from importlib.metadata import version
 import platform
 import secrets
 import subprocess
@@ -23,6 +23,25 @@ from .core.state import InstallationState, instance_dir_or_raise
 
 app = typer.Typer(add_completion=False, help="Installer & Updater für Katalon Collections.")
 console = Console()
+
+
+def _version_callback(value: bool) -> None:
+    if value:
+        console.print(f"katalon {version('katalon-cli')}")
+        raise typer.Exit()
+
+
+@app.callback()
+def _main(
+    version: bool = typer.Option(
+        False,
+        "--version",
+        callback=_version_callback,
+        is_eager=True,
+        help="Version anzeigen und beenden.",
+    ),
+) -> None:
+    pass
 
 DEFAULT_DIR = default_instance_dir()
 
@@ -316,17 +335,6 @@ def logs(
     if service:
         args.append(service)
     docker.compose(dir, *args)
-
-
-@app.command()
-def doctor(dir: Path = typer.Option(DEFAULT_DIR, "--dir")):
-    """Diagnose: Docker, Diskspace, Compose-Status."""
-    _run_checks(dir)
-    try:
-        instance_dir_or_raise(dir)
-    except FileNotFoundError:
-        return
-    docker.compose(dir, "ps")
 
 
 def _ensure_db_running(dir: Path, yes: bool = False) -> None:
