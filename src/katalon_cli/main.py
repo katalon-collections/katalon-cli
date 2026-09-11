@@ -1,11 +1,12 @@
 """katalon — Installer & Updater CLI für Production-Instanzen."""
 
 from __future__ import annotations
-from importlib.metadata import version
+
 import platform
 import secrets
 import subprocess
 from datetime import datetime, timezone
+from importlib.metadata import version
 from pathlib import Path
 from urllib.parse import urlparse
 
@@ -67,15 +68,95 @@ OPTIONAL_ENV_BLOCK = f"""
 """
 
 
-def _ensure_env_vars(dir: Path, base_url: str, media_root: str | None = None) -> None:
-    """Schreibt fehlende Pflicht-Env-Vars nach — idempotent, überschreibt nichts Vorhandenes."""
-    env_path = dir / ".env"
-    raw = env_path.read_text() if env_path.exists() else ""
+def _parse_env_file(raw: str) -> dict[str, str]:
+    """Parst aktive (nicht auskommentierte) KEY=VALUE-Zeilen einer .env."""
     existing: dict[str, str] = {}
     for line in raw.splitlines():
         if "=" in line and not line.startswith("#"):
             key, _, value = line.partition("=")
             existing[key] = value
+    return existing
+
+
+def _mentioned_env_keys(raw: str) -> set[str]:
+    """Alle Keys, die in der .env vorkommen — aktiv oder auskommentiert."""
+    keys: set[str] = set()
+    for line in raw.splitlines():
+        key, sep, _ = line.lstrip("#").strip().partition("=")
+        if sep and key and all(c.isalnum() or c == "_" for c in key):
+            keys.add(key)
+    return keys
+
+
+def _collect_required_env_vars(
+    existing: dict[str, str], env_vars: list[release.ReleaseEnvVar], yes: bool
+) -> dict[str, str]:
+    """Fragt neue Pflicht-Variablen ohne Default/Secret interaktiv ab (bricht mit --yes ab)."""
+    missing = [
+        var
+        for var in env_vars
+        if var.required and not var.secret and var.default is None and var.key not in existing
+    ]
+    if not missing:
+        return {}
+    if yes:
+        keys = ", ".join(var.key for var in missing)
+        console.print(
+            f"[red]✖ Neue Pflicht-Variable(n) ohne Default: {keys} — "
+            "mit --yes nicht automatisch setzbar, manuell in .env eintragen und erneut versuchen.[/]"
+        )
+        raise typer.Exit(1)
+    console.print("[yellow]Neue Pflicht-Variablen aus diesem Release — Wert eingeben:[/]")
+    provided: dict[str, str] = {}
+    for var in missing:
+        prompt_label = f"{var.key} ({var.description})" if var.description else var.key
+        value = ""
+        while not value:
+            value = Prompt.ask(prompt_label)
+        provided[var.key] = value
+    return provided
+
+
+def _print_new_env_vars(existing: dict[str, str], env_vars: list[release.ReleaseEnvVar]) -> None:
+    new_vars = [var for var in env_vars if var.key not in existing]
+    if not new_vars:
+        return
+    console.print("[cyan]Neue Umgebungsvariablen in diesem Release:[/]")
+    for var in new_vars:
+        tag = "[red]Pflicht[/]" if var.required else "optional"
+        console.print(f"  {tag} [bold]{var.key}[/] — {var.description}")
+
+
+def _print_deprecated_env_vars(existing: dict[str, str], deprecated: list[release.DeprecatedEnvVar]) -> None:
+    for var in deprecated:
+        if var.key in existing:
+            note = f" — {var.note}" if var.note else ""
+            console.print(f"[yellow]⚠ Veraltete Variable in .env: {var.key}{note}[/]")
+
+
+def _ensure_env_vars(
+    dir: Path,
+    base_url: str,
+    media_root: str | None = None,
+    release_env_vars: list[release.ReleaseEnvVar] | None = None,
+    provided: dict[str, str] | None = None,
+) -> None:
+    """Ergänzt fehlende Env-Vars — append-only, überschreibt/löscht nie vorhandene Zeilen
+    (Ausnahme: veraltete DATABASE_URL-Zeile, s.u.). Muss append-only bleiben, weil eine
+    Neuzusammensetzung aus dem geparsten Dict alle Kommentarzeilen (optionale Config-Doku,
+    veraltete-Variablen-Hinweise) beim nächsten Aufruf stillschweigend löschen würde."""
+    env_path = dir / ".env"
+    raw = env_path.read_text() if env_path.exists() else ""
+    existing = _parse_env_file(raw)
+    mentioned = _mentioned_env_keys(raw)
+
+    # Alte Installs hatten DATABASE_URL statisch in .env — jetzt aus POSTGRES_PASSWORD
+    # in compose.yaml abgeleitet (einzige Quelle der Wahrheit), Altlast entfernen.
+    if "DATABASE_URL" in existing:
+        raw = "\n".join(line for line in raw.splitlines() if not line.startswith("DATABASE_URL="))
+        if raw:
+            raw += "\n"
+        existing.pop("DATABASE_URL")
 
     postgres_password = existing.get("POSTGRES_PASSWORD", secrets.token_urlsafe(24))
     defaults = {
@@ -89,16 +170,40 @@ def _ensure_env_vars(dir: Path, base_url: str, media_root: str | None = None) ->
     }
     if media_root is not None:
         defaults["MEDIA_ROOT"] = media_root
-    for key, value in defaults.items():
-        existing.setdefault(key, value)
 
-    # Alte Installs hatten DATABASE_URL statisch in .env — jetzt aus POSTGRES_PASSWORD
-    # in compose.yaml abgeleitet (einzige Quelle der Wahrheit), Altlast entfernen.
-    existing.pop("DATABASE_URL", None)
+    new_active = {key: value for key, value in defaults.items() if key not in existing}
 
-    content = "".join(f"{key}={value}\n" for key, value in existing.items())
+    new_optional: list[release.ReleaseEnvVar] = []
+    for var in release_env_vars or []:
+        if var.key in existing or var.key in new_active:
+            continue
+        if provided and var.key in provided:
+            new_active[var.key] = provided[var.key]
+        elif var.secret:
+            new_active[var.key] = secrets.token_urlsafe(32)
+        elif var.default is not None:
+            new_active[var.key] = var.default
+        elif not var.required and var.key not in mentioned:
+            new_optional.append(var)
+        # Pflicht ohne Default/Secret/Wert: wurde vorher interaktiv abgefragt
+        # (_collect_required_env_vars) bzw. hat mit --yes bereits abgebrochen.
+        # Fehlt sie trotzdem, bleibt sie bewusst unversorgt statt mit einem
+        # Fake-Default verschleiert — der Container macht den Fehler beim Start sichtbar.
+
+    content = raw
+    if content and not content.endswith("\n"):
+        content += "\n"
+    for key, value in new_active.items():
+        content += f"{key}={value}\n"
     if OPTIONAL_ENV_MARKER not in raw:
         content += OPTIONAL_ENV_BLOCK
+    if new_optional:
+        content += "\n# --- neu in diesem Release (optional) ---\n"
+        for var in new_optional:
+            comment = f"# {var.key}="
+            if var.description:
+                comment += f"  # {var.description}"
+            content += comment + "\n"
     env_path.write_text(content)
 
 
@@ -213,18 +318,21 @@ def install(
         task = progress.add_task("Lade Release-Metadaten …", total=None)
         try:
             meta = release.get_latest_release()
-        except Exception as exc:  # noqa: BLE001
+        except Exception as exc:
             progress.stop()
             console.print(f"[red]✖ Release-Metadaten konnten nicht geladen werden: {exc}[/]")
             raise typer.Exit(1) from exc
         progress.update(task, description=f"Release {meta.version} gefunden")
 
+    provided = _collect_required_env_vars({}, meta.env_vars, yes=False)
+
+    with Progress(SpinnerColumn(), TextColumn("[progress.description]{task.description}"), console=console) as progress:
         progress.add_task("Schreibe compose.yaml + .env …", total=None)
         dir.mkdir(parents=True, exist_ok=True)
         Path(media_root).mkdir(parents=True, exist_ok=True)
         write_compose(dir, version=meta.version, base_url=base_url, tls_mode=tls_mode)
 
-        _ensure_env_vars(dir, base_url, media_root=media_root)
+        _ensure_env_vars(dir, base_url, media_root=media_root, release_env_vars=meta.env_vars, provided=provided)
         _write_override_example(dir)
 
         state = InstallationState(
@@ -384,7 +492,7 @@ def update(
     state = InstallationState.load(dir)
     try:
         meta = release.get_release(target) if target else release.get_latest_release()
-    except Exception as exc:  # noqa: BLE001
+    except Exception as exc:
         console.print(f"[red]✖ Release-Metadaten konnten nicht geladen werden: {exc}[/]")
         raise typer.Exit(1) from exc
 
@@ -404,14 +512,23 @@ def update(
             f"(Revision {state.compose_revision} → {meta.compose_revision})[/]"
         )
 
+    env_existing = _parse_env_file((dir / ".env").read_text() if (dir / ".env").exists() else "")
+    _print_new_env_vars(env_existing, meta.env_vars)
+    _print_deprecated_env_vars(env_existing, meta.deprecated_env_vars)
+
     if not yes and not Confirm.ask("Update durchführen?"):
         raise typer.Exit(0)
+    provided = _collect_required_env_vars(env_existing, meta.env_vars, yes=yes)
     _ensure_db_running(dir, yes=yes)
-
 
     steps = [
         ("Backup erstellen", lambda: backup_mod.create_backup(dir)),
-        ("Env-Vars ergänzen", lambda: _ensure_env_vars(dir, state.base_url)),
+        (
+            "Env-Vars ergänzen",
+            lambda: _ensure_env_vars(
+                dir, state.base_url, release_env_vars=meta.env_vars, provided=provided
+            ),
+        ),
         (
             "compose.yaml rendern",
             lambda: write_compose(dir, version=meta.version, base_url=state.base_url, tls_mode=state.tls_mode),

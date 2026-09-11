@@ -7,7 +7,7 @@ import time
 from pathlib import Path
 
 import httpx
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 GITHUB_REPO = "katalon-collections/katalon"
 CACHE_TTL_SECONDS = 3600
@@ -19,6 +19,23 @@ class ReleaseRequirements(BaseModel):
     elasticsearch: str | None = None
 
 
+class ReleaseEnvVar(BaseModel):
+    """Neu hinzugekommene Umgebungsvariable eines Releases (katalon-release.json)."""
+
+    key: str
+    description: str = ""
+    required: bool = False
+    secret: bool = False
+    default: str | None = None
+
+
+class DeprecatedEnvVar(BaseModel):
+    """Veraltete Umgebungsvariable eines Releases (katalon-release.json)."""
+
+    key: str
+    note: str = ""
+
+
 class ReleaseMetadata(BaseModel):
     version: str
     minimum_installer_version: str
@@ -26,6 +43,8 @@ class ReleaseMetadata(BaseModel):
     breaking: bool
     compose_revision: int
     requires: ReleaseRequirements = ReleaseRequirements()
+    env_vars: list[ReleaseEnvVar] = Field(default_factory=list)
+    deprecated_env_vars: list[DeprecatedEnvVar] = Field(default_factory=list)
 
 
 def _fetch_release_asset(tag: str | None) -> dict:

@@ -51,7 +51,11 @@ uv run pytest
 ## Architektur
 
 - `core/state.py` — `installation.json`, Single Source of Truth für laufende Version.
-- `core/release.py` — GitHub-Release-Metadaten (`katalon-release.json` Asset), 1h Cache.
+- `core/release.py` — GitHub-Release-Metadaten (`katalon-release.json` Asset), 1h Cache. Enthält
+  optional `env_vars`/`deprecated_env_vars`: `install`/`update` ergänzen neue Pflichtvariablen
+  automatisch (Secret generieren oder Default übernehmen), fragen bei fehlendem Default interaktiv
+  nach (`--yes` bricht dann ab), tragen neue optionale Variablen auskommentiert in `.env` ein und
+  warnen vor veralteten Variablen, die noch in der `.env` stehen.
 - `core/compose_gen.py` + `templates/compose.yaml.j2` + `templates/nginx.conf.j2` — rendert `compose.yaml`
   + `nginx.conf` aus Version + TLS-Modus; erzeugt bei `tls_mode=standalone` ein selbstsigniertes
   Zertifikat unter `<dir>/certs/` (eigenes Zertifikat dort ablegen, um es zu ersetzen).
