@@ -500,6 +500,17 @@ def update(
         console.print(f"[green]✔[/] Bereits auf aktueller Version {meta.version}.")
         return
 
+    try:
+        update_releases = release.get_releases_between(state.version, meta.version)
+    except Exception as exc:
+        console.print(f"[red]✖ Release-Metadaten konnten nicht geladen werden: {exc}[/]")
+        raise typer.Exit(1) from exc
+    env_vars = [var for item in update_releases for var in item.env_vars]
+    deprecated_env_vars = [
+        var for item in update_releases for var in item.deprecated_env_vars
+    ]
+
+
     console.rule("Update")
     console.print(f"Aktuell: [bold]{state.version}[/]  →  Ziel: [bold]{meta.version}[/]")
     if meta.breaking:
@@ -513,12 +524,12 @@ def update(
         )
 
     env_existing = _parse_env_file((dir / ".env").read_text() if (dir / ".env").exists() else "")
-    _print_new_env_vars(env_existing, meta.env_vars)
-    _print_deprecated_env_vars(env_existing, meta.deprecated_env_vars)
+    _print_new_env_vars(env_existing, env_vars)
+    _print_deprecated_env_vars(env_existing, deprecated_env_vars)
 
     if not yes and not Confirm.ask("Update durchführen?"):
         raise typer.Exit(0)
-    provided = _collect_required_env_vars(env_existing, meta.env_vars, yes=yes)
+    provided = _collect_required_env_vars(env_existing, env_vars, yes=yes)
     _ensure_db_running(dir, yes=yes)
 
     steps = [
@@ -526,7 +537,7 @@ def update(
         (
             "Env-Vars ergänzen",
             lambda: _ensure_env_vars(
-                dir, state.base_url, release_env_vars=meta.env_vars, provided=provided
+                dir, state.base_url, release_env_vars=env_vars, provided=provided
             ),
         ),
         (

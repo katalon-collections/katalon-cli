@@ -235,6 +235,43 @@ def test_release_metadata_parses_env_vars():
     assert meta.env_vars[0].required is True
     assert meta.deprecated_env_vars[0].note == "Ersetzt durch OIDC_CLIENT_ID"
 
+def test_get_releases_between_includes_skipped_env_metadata(monkeypatch):
+    from katalon_cli.core import release
+
+    def payload(version: str, env_var: str) -> dict:
+        return {
+            "version": version,
+            "minimum_installer_version": "0.1.0",
+            "migration_required": False,
+            "breaking": False,
+            "compose_revision": 1,
+            "env_vars": [{"key": env_var, "description": env_var}],
+        }
+
+    metadata = {
+        "1.1.0": payload("1.1.0", "FIRST_RELEASE_VAR"),
+        "1.2.0": payload("1.2.0", "SKIPPED_RELEASE_VAR"),
+        "1.3.0": payload("1.3.0", "TARGET_RELEASE_VAR"),
+    }
+    monkeypatch.setattr(
+        release,
+        "_fetch_releases",
+        lambda: [{"tag_name": f"v{version}"} for version in reversed(metadata)],
+    )
+    monkeypatch.setattr(
+        release,
+        "_fetch_release_asset",
+        lambda tag: metadata[tag.lstrip("v")],
+    )
+
+    releases = release.get_releases_between("1.1.0", "1.3.0")
+
+    assert [item.version for item in releases] == ["1.2.0", "1.3.0"]
+    assert [item.env_vars[0].key for item in releases] == [
+        "SKIPPED_RELEASE_VAR",
+        "TARGET_RELEASE_VAR",
+    ]
+
 
 def test_ensure_env_vars_release_secret_and_default(tmp_path: Path):
     from katalon_cli.core.release import ReleaseEnvVar
