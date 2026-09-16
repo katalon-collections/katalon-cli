@@ -16,6 +16,7 @@ uv tool install katalon-cli
 ```bash
 katalon install              # interaktiver Setup-Wizard (Rich-Prompts + Progress)
 katalon start / stop / status
+katalon check-updates         # prüft nur, ob ein neues Release verfügbar ist
 katalon update                # interaktives Update, Backup zuerst immer
 katalon rollback               # letztes Backup einspielen
 katalon doctor                 # Docker, Diskspace, Ports prüfen

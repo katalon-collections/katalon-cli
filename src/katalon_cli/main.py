@@ -482,6 +482,23 @@ def doctor(dir: Path = typer.Option(DEFAULT_DIR, "--dir")):
     docker.compose(dir, "ps")
 
 @app.command()
+def check_updates(dir: Path = typer.Option(DEFAULT_DIR, "--dir")):
+    """Prüft, ob eine neue Katalon-Version verfügbar ist."""
+    instance_dir_or_raise(dir)
+    state = InstallationState.load(dir)
+    try:
+        meta = release.get_latest_release()
+    except Exception as exc:
+        console.print(f"[red]✖ Release-Metadaten konnten nicht geladen werden: {exc}[/]")
+        raise typer.Exit(1) from exc
+
+    if meta.version == state.version:
+        console.print(f"[green]✔[/] Bereits auf aktueller Version {meta.version}.")
+        return
+    console.print(f"Update verfügbar: [bold]{state.version}[/] → [bold]{meta.version}[/]")
+
+
+@app.command()
 def update(
     dir: Path = typer.Option(DEFAULT_DIR, "--dir"),
     target: str = typer.Option(None, "--target", help="Zielversion, default = latest"),

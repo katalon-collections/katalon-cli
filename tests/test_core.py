@@ -391,3 +391,48 @@ def test_ensure_env_vars_preserves_comments_across_repeated_calls(tmp_path: Path
     assert OPTIONAL_ENV_MARKER in raw
     assert "GEONAMES_USERNAME" in raw
     assert "SMTP_HOST" in raw
+
+
+def test_check_updates_reports_available_and_current_release(tmp_path: Path):
+    from unittest.mock import patch
+
+    from typer.testing import CliRunner
+
+    from katalon_cli.core.release import ReleaseMetadata
+    from katalon_cli.main import app
+
+    InstallationState(
+        version="1.0.0",
+        compose_revision=1,
+        base_url="http://localhost",
+        tls_mode="none",
+        installed_at=datetime.now(UTC),
+    ).save(tmp_path)
+    runner = CliRunner()
+    with patch(
+        "katalon_cli.main.release.get_latest_release",
+        side_effect=[
+            ReleaseMetadata(
+                version="1.1.0",
+                minimum_installer_version="0.1.0",
+                migration_required=False,
+                breaking=False,
+                compose_revision=1,
+            ),
+            ReleaseMetadata(
+                version="1.0.0",
+                minimum_installer_version="0.1.0",
+                migration_required=False,
+                breaking=False,
+                compose_revision=1,
+            ),
+        ],
+    ):
+        available = runner.invoke(app, ["check-updates", "--dir", str(tmp_path)])
+        current = runner.invoke(app, ["check-updates", "--dir", str(tmp_path)])
+
+    assert available.exit_code == 0
+    assert "1.0.0" in available.output
+    assert "1.1.0" in available.output
+    assert current.exit_code == 0
+    assert "Bereits auf aktueller Version 1.0.0" in current.output
