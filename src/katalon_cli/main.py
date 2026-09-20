@@ -593,6 +593,15 @@ def update(
     state.record(meta.version, meta.compose_revision, "update")
     state.save(dir)
     console.print(f"[green]✔[/] Update auf {meta.version} abgeschlossen.")
+
+    try:
+        notes = release.get_release_notes(f"v{meta.version}")
+    except Exception:
+        notes = ""
+    if notes:
+        console.rule("Changelog")
+        console.print(notes)
+
     _print_next_steps(dir, state.base_url)
 
 

@@ -2,16 +2,10 @@
 
 from __future__ import annotations
 
-import json
-import time
-from pathlib import Path
-
 import httpx
 from pydantic import BaseModel, Field
 
 GITHUB_REPO = "katalon-collections/katalon"
-CACHE_TTL_SECONDS = 3600
-CACHE_PATH = Path.home() / ".cache" / "katalon-cli" / "releases.json"
 
 
 class ReleaseRequirements(BaseModel):
@@ -69,6 +63,16 @@ def _fetch_release_asset(tag: str | None) -> dict:
         asset_resp.raise_for_status()
         return asset_resp.json()
 
+def get_release_notes(tag: str) -> str:
+    """Lädt den Changelog-Text (Release-Body) für einen Tag."""
+    with httpx.Client(timeout=15) as client:
+        release = client.get(
+            f"https://api.github.com/repos/{GITHUB_REPO}/releases/tags/{tag}"
+        )
+        release.raise_for_status()
+        return release.json().get("body") or ""
+
+
 def _fetch_releases() -> list[dict]:
     """Lädt alle veröffentlichten Katalon-Releases."""
     releases: list[dict] = []
@@ -119,15 +123,8 @@ def get_releases_between(installed_version: str, target_version: str) -> list[Re
     ]
 
 
-def get_latest_release(*, use_cache: bool = True) -> ReleaseMetadata:
-    if use_cache and CACHE_PATH.exists():
-        age = time.time() - CACHE_PATH.stat().st_mtime
-        if age < CACHE_TTL_SECONDS:
-            return ReleaseMetadata.model_validate_json(CACHE_PATH.read_text())
-
+def get_latest_release() -> ReleaseMetadata:
     payload = _fetch_release_asset(tag=None)
-    CACHE_PATH.parent.mkdir(parents=True, exist_ok=True)
-    CACHE_PATH.write_text(json.dumps(payload))
     return ReleaseMetadata.model_validate(payload)
 
 
