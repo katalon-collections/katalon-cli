@@ -52,7 +52,7 @@ uv run pytest
 ## Architektur
 
 - `core/state.py` — `installation.json`, Single Source of Truth für laufende Version.
-- `core/release.py` — GitHub-Release-Metadaten (`katalon-release.json` Asset), 1h Cache. Enthält
+- `core/release.py` — GitHub-Release-Metadaten (`katalon-release.json` Asset). Enthält
   optional `env_vars`/`deprecated_env_vars`: `install`/`update` ergänzen neue Pflichtvariablen
   automatisch (Secret generieren oder Default übernehmen), fragen bei fehlendem Default interaktiv
   nach (`--yes` bricht dann ab), tragen neue optionale Variablen auskommentiert in `.env` ein und
