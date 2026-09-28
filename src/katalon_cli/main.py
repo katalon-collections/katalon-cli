@@ -284,7 +284,10 @@ def install(
     if dir is None:
         console.print(f"Zielverzeichnis — Standard für {platform.system()}: [cyan]{DEFAULT_DIR}[/]")
         dir = Path(Prompt.ask("Zielverzeichnis", default=str(DEFAULT_DIR)))
-    dir = dir.expanduser().resolve()
+    resolved = dir.expanduser().resolve()
+    if resolved != dir:
+        console.print(f"Zielverzeichnis (absolut): [cyan]{resolved}[/]")
+    dir = resolved
 
     if (dir / "installation.json").exists():
         console.print(f"[red]✖[/] {dir} ist bereits eine Katalon-Instanz.")
