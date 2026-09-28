@@ -165,6 +165,8 @@ def _ensure_env_vars(
         "SECRET_KEY": secrets.token_urlsafe(32),
         "KATALON_SECRETS_KEY": secrets.token_urlsafe(32),
         "CANTALOUPE_PUBLIC_URL": base_url,
+        # API verweigert den Start im Prod-Modus, solange das Passwort ein Well-known-Default ist.
+        "DEFAULT_ADMIN_PASSWORD": secrets.token_urlsafe(16),
     }
     if media_root is not None:
         defaults["MEDIA_ROOT"] = media_root
@@ -377,8 +379,7 @@ def _env_value(dir: Path, key: str) -> str | None:
 
 
 def _first_run_credentials(dir: Path) -> str | None:
-    """Liest echte Admin-Credentials aus der API — DEFAULT_ADMIN_EMAIL/PASSWORD in .env
-    werden von der API ignoriert, sie generiert First-Run-Credentials selbst."""
+    """Liest die Admin-Credentials, die die API beim ersten Start selbst generiert hat."""
     creds_path = _env_value(dir, "FIRST_RUN_CREDENTIALS_PATH") or "/var/lib/katalon/first-run-credentials.txt"
     result = docker.compose(dir, "exec", "-T", "api", "cat", creds_path, check=False, capture=True)
     if result.returncode == 0 and result.stdout.strip():

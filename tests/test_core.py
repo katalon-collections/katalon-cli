@@ -436,3 +436,11 @@ def test_check_updates_reports_available_and_current_release(tmp_path: Path):
     assert "1.1.0" in available.output
     assert current.exit_code == 0
     assert "Bereits auf aktueller Version 1.0.0" in current.output
+
+
+def test_ensure_env_vars_sets_non_default_admin_password(tmp_path: Path):
+    from katalon_cli.main import _ensure_env_vars, _parse_env_file
+
+    _ensure_env_vars(tmp_path, "http://localhost")
+    password = _parse_env_file((tmp_path / ".env").read_text())["DEFAULT_ADMIN_PASSWORD"]
+    assert password not in {"admin", "password", "katalon"} and len(password) >= 16
