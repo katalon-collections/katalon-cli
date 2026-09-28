@@ -22,7 +22,7 @@ from .core.compose_gen import write_compose
 from .core.paths import default_instance_dir
 from .core.state import InstallationState, instance_dir_or_raise
 
-app = typer.Typer(add_completion=False, help="Installer & Updater für Katalon Collections.")
+app = typer.Typer(add_completion=False, no_args_is_help=True, help="Installer & Updater für Katalon Collections.")
 console = Console()
 
 
@@ -284,6 +284,7 @@ def install(
     if dir is None:
         console.print(f"Zielverzeichnis — Standard für {platform.system()}: [cyan]{DEFAULT_DIR}[/]")
         dir = Path(Prompt.ask("Zielverzeichnis", default=str(DEFAULT_DIR)))
+    dir = dir.expanduser().resolve()
 
     if (dir / "installation.json").exists():
         console.print(f"[red]✖[/] {dir} ist bereits eine Katalon-Instanz.")
@@ -389,7 +390,7 @@ def _print_next_steps(dir: Path, base_url: str) -> None:
 @app.command()
 def start(dir: Path = typer.Option(DEFAULT_DIR, "--dir")):
     """Stack starten."""
-    instance_dir_or_raise(dir)
+    dir = instance_dir_or_raise(dir)
     docker.compose(dir, "up", "-d")
     console.print("[green]✔[/] Stack gestartet.")
     state = InstallationState.load(dir)
@@ -399,7 +400,7 @@ def start(dir: Path = typer.Option(DEFAULT_DIR, "--dir")):
 @app.command()
 def stop(dir: Path = typer.Option(DEFAULT_DIR, "--dir")):
     """Stack stoppen."""
-    instance_dir_or_raise(dir)
+    dir = instance_dir_or_raise(dir)
     docker.compose(dir, "stop")
     console.print("[green]✔[/] Stack gestoppt.")
 
@@ -407,7 +408,7 @@ def stop(dir: Path = typer.Option(DEFAULT_DIR, "--dir")):
 @app.command()
 def restart(dir: Path = typer.Option(DEFAULT_DIR, "--dir")):
     """Stack neu starten."""
-    instance_dir_or_raise(dir)
+    dir = instance_dir_or_raise(dir)
     docker.compose(dir, "restart")
     console.print("[green]✔[/] Stack neu gestartet.")
 
@@ -415,7 +416,7 @@ def restart(dir: Path = typer.Option(DEFAULT_DIR, "--dir")):
 @app.command()
 def status(dir: Path = typer.Option(DEFAULT_DIR, "--dir")):
     """Versionen, Container-Health, Diskspace."""
-    instance_dir_or_raise(dir)
+    dir = instance_dir_or_raise(dir)
     state = InstallationState.load(dir)
 
     table = Table(show_header=False)
@@ -436,7 +437,7 @@ def logs(
     follow: bool = typer.Option(True, "--follow/--no-follow"),
 ):
     """Wrapper um docker compose logs."""
-    instance_dir_or_raise(dir)
+    dir = instance_dir_or_raise(dir)
     args = ["logs"]
     if follow:
         args.append("-f")
@@ -465,7 +466,7 @@ def doctor(dir: Path = typer.Option(DEFAULT_DIR, "--dir")):
     """Diagnose: Docker, Diskspace, Compose-Status."""
     _run_checks(dir)
     try:
-        instance_dir_or_raise(dir)
+        dir = instance_dir_or_raise(dir)
     except FileNotFoundError:
         return
     state = InstallationState.load(dir)
@@ -484,7 +485,7 @@ def doctor(dir: Path = typer.Option(DEFAULT_DIR, "--dir")):
 @app.command()
 def check_updates(dir: Path = typer.Option(DEFAULT_DIR, "--dir")):
     """Prüft, ob eine neue Katalon-Version verfügbar ist."""
-    instance_dir_or_raise(dir)
+    dir = instance_dir_or_raise(dir)
     state = InstallationState.load(dir)
     try:
         meta = release.get_latest_release()
@@ -505,7 +506,7 @@ def update(
     yes: bool = typer.Option(False, "--yes", help="Ohne Rückfrage"),
 ):
     """Update auf neue Version — Backup zuerst, immer."""
-    instance_dir_or_raise(dir)
+    dir = instance_dir_or_raise(dir)
     state = InstallationState.load(dir)
     try:
         meta = release.get_release(target) if target else release.get_latest_release()
@@ -611,7 +612,7 @@ def rollback(
     yes: bool = typer.Option(False, "--yes"),
 ):
     """Letztes Backup einspielen (kein Alembic-Downgrade)."""
-    instance_dir_or_raise(dir)
+    dir = instance_dir_or_raise(dir)
     backup_dir = backup_mod.latest_backup(dir)
     if backup_dir is None:
         console.print("[red]✖[/] Kein Backup vorhanden.")

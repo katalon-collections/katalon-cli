@@ -59,6 +59,7 @@ class InstallationState(BaseModel):
 
 
 def instance_dir_or_raise(path: Path) -> Path:
+    path = path.expanduser().resolve()
     if not (path / STATE_FILENAME).exists():
         raise FileNotFoundError(
             f"Kein Katalon in {path} gefunden (installation.json fehlt). "

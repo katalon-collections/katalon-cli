@@ -35,7 +35,12 @@ def check_compose() -> CheckResult:
 
 
 def check_disk_space(path: Path, min_gb: int = MIN_FREE_DISK_GB) -> CheckResult:
-    path.mkdir(parents=True, exist_ok=True)
+    try:
+        path.mkdir(parents=True, exist_ok=True)
+    except PermissionError:
+        return CheckResult(
+            "Diskspace", False, f"keine Schreibrechte für {path} — mit sudo ausführen oder --dir setzen"
+        )
     free_gb = shutil.disk_usage(path).free / (1024**3)
     ok = free_gb >= min_gb
     return CheckResult(
