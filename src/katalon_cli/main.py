@@ -165,8 +165,6 @@ def _ensure_env_vars(
         "SECRET_KEY": secrets.token_urlsafe(32),
         "KATALON_SECRETS_KEY": secrets.token_urlsafe(32),
         "CANTALOUPE_PUBLIC_URL": base_url,
-        "DEFAULT_ADMIN_EMAIL": "admin@example.org",
-        "DEFAULT_ADMIN_PASSWORD": secrets.token_urlsafe(16),
     }
     if media_root is not None:
         defaults["MEDIA_ROOT"] = media_root
@@ -351,7 +349,7 @@ def install(
 
     console.print(f"[green]✔[/] Instanz eingerichtet in [bold]{dir}[/]")
     console.print(
-        f"Admin-Login (DEFAULT_ADMIN_EMAIL/DEFAULT_ADMIN_PASSWORD) wurde generiert in [bold]{dir / '.env'}[/]."
+        "Admin-Login wird von der API beim ersten Start generiert und nach dem Start angezeigt."
     )
     console.print(
         f"Weitere optionale Config-Variablen sind auskommentiert in [bold]{dir / '.env'}[/] angelegt "
@@ -378,15 +376,31 @@ def _env_value(dir: Path, key: str) -> str | None:
     return None
 
 
+def _first_run_credentials(dir: Path) -> str | None:
+    """Liest echte Admin-Credentials aus der API — DEFAULT_ADMIN_EMAIL/PASSWORD in .env
+    werden von der API ignoriert, sie generiert First-Run-Credentials selbst."""
+    creds_path = _env_value(dir, "FIRST_RUN_CREDENTIALS_PATH") or "/var/lib/katalon/first-run-credentials.txt"
+    result = docker.compose(dir, "exec", "-T", "api", "cat", creds_path, check=False, capture=True)
+    if result.returncode == 0 and result.stdout.strip():
+        return result.stdout.strip()
+    return None
+
+
 def _print_next_steps(dir: Path, base_url: str) -> None:
     base_url = base_url.rstrip("/")
     console.print()
     console.print(f"Portal:      [bold]{base_url}/[/]")
     console.print(f"Admin:       [bold]{base_url}/admin/[/]")
-    admin_email = _env_value(dir, "DEFAULT_ADMIN_EMAIL")
-    admin_password = _env_value(dir, "DEFAULT_ADMIN_PASSWORD")
-    if admin_email and admin_password:
-        console.print(f"Admin-Login: [bold]{admin_email}[/] / [bold]{admin_password}[/] (siehe auch {dir / '.env'})")
+    creds = _first_run_credentials(dir)
+    if creds:
+        console.print("Admin-Login (First-Run-Credentials aus der API):")
+        console.print(f"  {creds}")
+    else:
+        console.print(
+            "[yellow]Admin-Login konnte nicht aus der API gelesen werden "
+            "(Container evtl. noch nicht bereit) — später mit:[/]"
+        )
+        console.print(f"  docker compose -f {dir / 'compose.yaml'} exec api cat /var/lib/katalon/first-run-credentials.txt")
     console.print("Docs:        [bold]https://katalon-collections.github.io/katalon-docs/[/]")
 
 
