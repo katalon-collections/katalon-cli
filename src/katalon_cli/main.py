@@ -393,8 +393,7 @@ def _print_next_steps(dir: Path, base_url: str) -> None:
     console.print(f"Admin:       [bold]{base_url}/admin/[/]")
     creds = _first_run_credentials(dir)
     if creds:
-        console.print("Admin-Login (First-Run-Credentials aus der API):")
-        console.print(f"  {creds}")
+        console.print(f"Admin-Login: [bold]{creds}[/]")
     else:
         console.print(
             "[yellow]Admin-Login konnte nicht aus der API gelesen werden "
