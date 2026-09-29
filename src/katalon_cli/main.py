@@ -165,8 +165,6 @@ def _ensure_env_vars(
         "SECRET_KEY": secrets.token_urlsafe(32),
         "KATALON_SECRETS_KEY": secrets.token_urlsafe(32),
         "CANTALOUPE_PUBLIC_URL": base_url,
-        # API verweigert den Start im Prod-Modus, solange das Passwort ein Well-known-Default ist.
-        "DEFAULT_ADMIN_PASSWORD": secrets.token_urlsafe(16),
     }
     if media_root is not None:
         defaults["MEDIA_ROOT"] = media_root
@@ -395,6 +393,10 @@ def _print_next_steps(dir: Path, base_url: str) -> None:
     creds = _first_run_credentials(dir)
     if creds:
         console.print(f"Admin-Login: [bold]{creds}[/]")
+        console.print(
+            "[yellow]Passwort jetzt speichern und beim ersten Login ändern — es steht nicht in der .env. "
+            f"Bei Verlust: docker compose -f {dir / 'compose.yaml'} exec api katalon-manage reset-admin[/]"
+        )
     else:
         console.print(
             "[yellow]Admin-Login konnte nicht aus der API gelesen werden "
