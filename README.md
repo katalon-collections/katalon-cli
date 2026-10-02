@@ -1,7 +1,7 @@
 # katalon-cli
 
 Installer & Updater für [Katalon Collections](https://github.com/katalon-collections/katalon) Production-Instanzen.
-Verwaltet eine Instanz unter einem Zielverzeichnis (z.B. `/opt/katalon/`) — pullt gepinnte
+Verwaltet eine Instanz unter einem frei gewählten Zielverzeichnis — pullt gepinnte
 Release-Images, generiert `compose.yaml`, macht Backups vor jedem Update, kann rollbacken.
 
 ## Installation
@@ -24,21 +24,24 @@ katalon backup                 # manuelles Backup
 katalon logs [service]
 ```
 
-Alle Befehle: `--dir PATH` (default `/opt/katalon`). `install`/`update` fragen interaktiv
-(Auswahl über `rich.prompt`), `update`/`rollback` haben `--yes` zum Überspringen der Rückfrage.
+`install` ohne `--dir` fragt das Zielverzeichnis interaktiv ab. Nach erfolgreicher Einrichtung
+wird der absolute Pfad benutzerweit in `~/.config/katalon/instance` gespeichert.
+Bei gesetztem, absolutem `XDG_CONFIG_HOME` liegt die Datei stattdessen unter
+`$XDG_CONFIG_HOME/katalon/instance`. Das Konfigurationsverzeichnis wird bei Bedarf angelegt.
+Alle weiteren Befehle verwenden den gespeicherten Pfad, unabhängig vom Arbeitsverzeichnis.
+Ohne gespeicherten Pfad ist der Default auf allen Plattformen `~/katalon`.
 
-`/opt/katalon` gehört root — `katalon install` scheitert dort ohne Vorbereitung mit
-"Permission denied". `sudo katalon install` funktioniert i.d.R. nicht (sudo hat eigenes
-PATH, findet das per `uv tool` installierte `katalon` nicht). Zwei Optionen:
+Alle Befehle unterstützen `--dir PATH`: überschreibt den Pfad nur für diesen Aufruf.
+Eine erfolgreiche neue Installation speichert ihr Zielverzeichnis als neuen Default.
+Bestehende Instanzen lassen sich weiterhin mit `--dir` verwenden; alternativ ihren absoluten
+Pfad als einzige Zeile in die Konfigurationsdatei eintragen.
+`install`/`update` fragen interaktiv (Auswahl über `rich.prompt`),
+`update`/`rollback` haben `--yes` zum Überspringen der Rückfrage.
 
 ```bash
-# a) anderes Zielverzeichnis, kein root nötig
-katalon install --dir ~/katalon
-
-# b) bei /opt/katalon bleiben: Verzeichnis vorab anlegen und dem User geben
-sudo mkdir -p /opt/katalon
-sudo chown $USER:$USER /opt/katalon
-katalon install --dir /opt/katalon
+katalon install --dir ~/meine-katalon-instanz
+katalon start
+katalon status
 ```
 
 ## Entwicklung

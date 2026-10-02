@@ -1,8 +1,103 @@
 from datetime import UTC, datetime
 from pathlib import Path
 
+import pytest
+
 from katalon_cli.core.compose_gen import render_compose
 from katalon_cli.core.state import InstallationState
+
+
+def test_instance_path_config_roundtrip(tmp_path, monkeypatch):
+    from katalon_cli.core.paths import default_instance_dir, instance_config_path, save_instance_dir
+    from katalon_cli.core.state import instance_dir_or_raise
+
+    monkeypatch.setenv("HOME", str(tmp_path))
+    monkeypatch.delenv("XDG_CONFIG_HOME", raising=False)
+    assert default_instance_dir() == tmp_path / "katalon"
+    assert instance_config_path() == tmp_path / ".config/katalon/instance"
+    monkeypatch.setenv("XDG_CONFIG_HOME", "relative-config")
+    assert instance_config_path() == tmp_path / ".config/katalon/instance"
+    monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path / "custom-config"))
+    assert instance_config_path() == tmp_path / "custom-config/katalon/instance"
+
+    monkeypatch.chdir(tmp_path)
+    instance = tmp_path / "my instance"
+    instance.mkdir()
+    (instance / "installation.json").write_text("{}")
+    save_instance_dir(Path("my instance"))
+    monkeypatch.chdir(tmp_path / "custom-config")
+    assert default_instance_dir() == instance
+    assert instance_dir_or_raise(None) == instance
+    assert instance_dir_or_raise(tmp_path / "my instance") == instance
+
+
+def test_invalid_instance_config_can_be_overridden(tmp_path, monkeypatch):
+    from katalon_cli.core.paths import default_instance_dir
+    from katalon_cli.core.state import instance_dir_or_raise
+
+    monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path))
+    config = tmp_path / "katalon/instance"
+    config.parent.mkdir()
+    config.write_text("")
+    with pytest.raises(ValueError, match="absoluter Pfad"):
+        default_instance_dir()
+    (tmp_path / "installation.json").write_text("{}")
+    assert instance_dir_or_raise(tmp_path) == tmp_path
+
+
+def test_cli_uses_saved_path_and_temporary_override(tmp_path, monkeypatch):
+    from unittest.mock import patch
+    from typer.testing import CliRunner
+    from katalon_cli.core.paths import default_instance_dir, save_instance_dir
+    from katalon_cli.main import app
+
+    monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path / "config"))
+    for name in ("first", "second"):
+        instance = tmp_path / name
+        instance.mkdir()
+        (instance / "installation.json").write_text("{}")
+    runner = CliRunner()
+    with patch("katalon_cli.main.docker.compose") as compose:
+        save_instance_dir(tmp_path / "first")
+        assert runner.invoke(app, ["stop"]).exit_code == 0
+        compose.assert_called_with(tmp_path / "first", "stop")
+        assert runner.invoke(app, ["stop", "--dir", str(tmp_path / "second")]).exit_code == 0
+        compose.assert_called_with(tmp_path / "second", "stop")
+        assert default_instance_dir() == tmp_path / "first"
+        save_instance_dir(tmp_path / "second")
+        assert runner.invoke(app, ["stop"]).exit_code == 0
+        compose.assert_called_with(tmp_path / "second", "stop")
+
+
+@pytest.mark.parametrize("checks_ok", [True, False])
+def test_install_saves_path_only_after_setup(tmp_path, monkeypatch, checks_ok):
+    from unittest.mock import patch
+    from typer.testing import CliRunner
+    from katalon_cli.core.paths import default_instance_dir, save_instance_dir
+    from katalon_cli.core.release import ReleaseMetadata
+    from katalon_cli.main import app
+
+    monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path / "config"))
+    previous = tmp_path / "previous"
+    save_instance_dir(previous)
+    instance = tmp_path / "new instance"
+    meta = ReleaseMetadata(
+        version="1.0.0", minimum_installer_version="0.1.0",
+        migration_required=False, breaking=False, compose_revision=1,
+    )
+    with patch("katalon_cli.main.Prompt.ask", side_effect=[
+        str(instance), "http://localhost", str(instance / "media"), "none",
+    ]), patch("katalon_cli.main._resolve_ports_and_base_url", return_value=("http://localhost", [80])), \
+         patch("katalon_cli.main._run_checks", return_value=checks_ok), \
+         patch("katalon_cli.main.release.get_latest_release", return_value=meta), \
+         patch("katalon_cli.main.write_compose"), \
+         patch("katalon_cli.main._ensure_env_vars"), \
+         patch("katalon_cli.main.Confirm.ask", return_value=False):
+        result = CliRunner().invoke(app, ["install"])
+    assert result.exit_code == (0 if checks_ok else 1), result.output
+    assert default_instance_dir() == (instance if checks_ok else previous)
+    if checks_ok:
+        assert InstallationState.load(instance).version == "1.0.0"
 
 
 def test_render_compose_standalone_exposes_tls_ports():

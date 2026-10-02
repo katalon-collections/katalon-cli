@@ -8,6 +8,8 @@ from pathlib import Path
 
 from pydantic import BaseModel, Field
 
+from .paths import default_instance_dir
+
 STATE_FILENAME = "installation.json"
 
 
@@ -58,7 +60,9 @@ class InstallationState(BaseModel):
         return self.history[-2]
 
 
-def instance_dir_or_raise(path: Path) -> Path:
+def instance_dir_or_raise(path: Path | None) -> Path:
+    if path is None:
+        path = default_instance_dir()
     path = path.expanduser().resolve()
     if not (path / STATE_FILENAME).exists():
         raise FileNotFoundError(

@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import platform
 import secrets
 import subprocess
 from datetime import datetime, timezone
@@ -19,7 +18,7 @@ from rich.table import Table
 from .core import backup as backup_mod
 from .core import checks, docker, release
 from .core.compose_gen import write_compose
-from .core.paths import default_instance_dir
+from .core.paths import default_instance_dir, save_instance_dir
 from .core.state import InstallationState, instance_dir_or_raise
 
 app = typer.Typer(add_completion=False, no_args_is_help=True, help="Installer & Updater für Katalon Collections.")
@@ -43,8 +42,6 @@ def _main(
     ),
 ) -> None:
     pass
-
-DEFAULT_DIR = default_instance_dir()
 
 TLS_CHOICES = {
     "standalone": "Standalone — eigenes nginx mit selbstsigniertem Zertifikat (Ports 80+443)",
@@ -272,16 +269,17 @@ def _resolve_ports_and_base_url(
 
 @app.command()
 def install(
-    dir: Path = typer.Option(
-        None, "--dir", help=f"Zielverzeichnis der Instanz (Default für dieses OS: {DEFAULT_DIR})"
+    dir: Path | None = typer.Option(
+        None, "--dir", help="Zielverzeichnis der Instanz (gespeicherter Pfad oder ~/katalon)."
     ),
 ):
     """Interaktiver Setup-Wizard für eine neue Instanz."""
     console.rule("[bold]Katalon Setup[/]")
 
     if dir is None:
-        console.print(f"Zielverzeichnis — Standard für {platform.system()}: [cyan]{DEFAULT_DIR}[/]")
-        dir = Path(Prompt.ask("Zielverzeichnis", default=str(DEFAULT_DIR)))
+        default_dir = default_instance_dir()
+        console.print(f"Zielverzeichnis — Standard: [cyan]{default_dir}[/]")
+        dir = Path(Prompt.ask("Zielverzeichnis", default=str(default_dir)))
     resolved = dir.expanduser().resolve()
     if resolved != dir:
         console.print(f"Zielverzeichnis (absolut): [cyan]{resolved}[/]")
@@ -347,6 +345,8 @@ def install(
         state.record(meta.version, meta.compose_revision, "install")
         state.save(dir)
 
+    save_instance_dir(dir)
+
     console.print(f"[green]✔[/] Instanz eingerichtet in [bold]{dir}[/]")
     console.print(
         "Admin-Login wird von der API beim ersten Start generiert und nach dem Start angezeigt."
@@ -363,7 +363,7 @@ def install(
     if Confirm.ask("Stack jetzt starten?", default=True):
         start(dir=dir)
     else:
-        console.print(f"Starten mit: [bold]katalon start --dir {dir}[/]")
+        console.print("Starten mit: [bold]katalon start[/]")
 
 
 def _env_value(dir: Path, key: str) -> str | None:
@@ -407,7 +407,7 @@ def _print_next_steps(dir: Path, base_url: str) -> None:
 
 
 @app.command()
-def start(dir: Path = typer.Option(DEFAULT_DIR, "--dir")):
+def start(dir: Path | None = typer.Option(None, "--dir")):
     """Stack starten."""
     dir = instance_dir_or_raise(dir)
     docker.compose(dir, "up", "-d")
@@ -417,7 +417,7 @@ def start(dir: Path = typer.Option(DEFAULT_DIR, "--dir")):
 
 
 @app.command()
-def stop(dir: Path = typer.Option(DEFAULT_DIR, "--dir")):
+def stop(dir: Path | None = typer.Option(None, "--dir")):
     """Stack stoppen."""
     dir = instance_dir_or_raise(dir)
     docker.compose(dir, "stop")
@@ -425,7 +425,7 @@ def stop(dir: Path = typer.Option(DEFAULT_DIR, "--dir")):
 
 
 @app.command()
-def restart(dir: Path = typer.Option(DEFAULT_DIR, "--dir")):
+def restart(dir: Path | None = typer.Option(None, "--dir")):
     """Stack neu starten."""
     dir = instance_dir_or_raise(dir)
     docker.compose(dir, "restart")
@@ -433,7 +433,7 @@ def restart(dir: Path = typer.Option(DEFAULT_DIR, "--dir")):
 
 
 @app.command()
-def status(dir: Path = typer.Option(DEFAULT_DIR, "--dir")):
+def status(dir: Path | None = typer.Option(None, "--dir")):
     """Versionen, Container-Health, Diskspace."""
     dir = instance_dir_or_raise(dir)
     state = InstallationState.load(dir)
@@ -452,7 +452,7 @@ def status(dir: Path = typer.Option(DEFAULT_DIR, "--dir")):
 @app.command()
 def logs(
     service: str = typer.Argument(None, help="Service-Name, leer = alle"),
-    dir: Path = typer.Option(DEFAULT_DIR, "--dir"),
+    dir: Path | None = typer.Option(None, "--dir"),
     follow: bool = typer.Option(True, "--follow/--no-follow"),
 ):
     """Wrapper um docker compose logs."""
@@ -481,8 +481,9 @@ def _ensure_db_running(dir: Path, yes: bool = False) -> None:
 
 
 @app.command()
-def doctor(dir: Path = typer.Option(DEFAULT_DIR, "--dir")):
+def doctor(dir: Path | None = typer.Option(None, "--dir")):
     """Diagnose: Docker, Diskspace, Compose-Status."""
+    dir = (dir if dir is not None else default_instance_dir()).expanduser().resolve()
     _run_checks(dir)
     try:
         dir = instance_dir_or_raise(dir)
@@ -502,7 +503,7 @@ def doctor(dir: Path = typer.Option(DEFAULT_DIR, "--dir")):
     docker.compose(dir, "ps")
 
 @app.command()
-def check_updates(dir: Path = typer.Option(DEFAULT_DIR, "--dir")):
+def check_updates(dir: Path | None = typer.Option(None, "--dir")):
     """Prüft, ob eine neue Katalon-Version verfügbar ist."""
     dir = instance_dir_or_raise(dir)
     state = InstallationState.load(dir)
@@ -520,7 +521,7 @@ def check_updates(dir: Path = typer.Option(DEFAULT_DIR, "--dir")):
 
 @app.command()
 def update(
-    dir: Path = typer.Option(DEFAULT_DIR, "--dir"),
+    dir: Path | None = typer.Option(None, "--dir"),
     target: str = typer.Option(None, "--target", help="Zielversion, default = latest"),
     yes: bool = typer.Option(False, "--yes", help="Ohne Rückfrage"),
 ):
@@ -627,7 +628,7 @@ def update(
 
 @app.command()
 def rollback(
-    dir: Path = typer.Option(DEFAULT_DIR, "--dir"),
+    dir: Path | None = typer.Option(None, "--dir"),
     yes: bool = typer.Option(False, "--yes"),
 ):
     """Letztes Backup einspielen (kein Alembic-Downgrade)."""
@@ -672,7 +673,7 @@ def rollback(
 def main() -> None:
     try:
         app()
-    except (FileNotFoundError, docker.DockerError, backup_mod.BackupError) as exc:
+    except (OSError, ValueError, docker.DockerError, backup_mod.BackupError) as exc:
         console.print(f"[red]✖[/] {exc}")
         raise SystemExit(1) from exc
     except subprocess.CalledProcessError as exc:
