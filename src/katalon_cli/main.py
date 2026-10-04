@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import secrets
 import subprocess
+import sys
 from datetime import datetime, timezone
 from importlib.metadata import version
 from pathlib import Path
@@ -16,7 +17,7 @@ from rich.prompt import Confirm, Prompt
 from rich.table import Table
 
 from .core import backup as backup_mod
-from .core import checks, docker, release
+from .core import checks, docker, release, selfupdate
 from .core.compose_gen import write_compose
 from .core.paths import default_instance_dir, save_instance_dir
 from .core.state import InstallationState, instance_dir_or_raise
@@ -361,7 +362,7 @@ def install(
     )
     console.print()
     if Confirm.ask("Stack jetzt starten?", default=True):
-        start(dir=dir)
+        _start(dir, show_credentials=True)
     else:
         console.print("Starten mit: [bold]katalon start[/]")
 
@@ -385,13 +386,15 @@ def _first_run_credentials(dir: Path) -> str | None:
     return None
 
 
-def _print_next_steps(dir: Path, base_url: str) -> None:
+def _print_next_steps(dir: Path, base_url: str, show_credentials: bool = False) -> None:
     base_url = base_url.rstrip("/")
     console.print()
     console.print(f"Portal:      [bold]{base_url}/[/]")
     console.print(f"Admin:       [bold]{base_url}/admin/[/]")
-    creds = _first_run_credentials(dir)
-    if creds:
+    creds = _first_run_credentials(dir) if show_credentials else None
+    if not show_credentials:
+        console.print("Admin-Passwort vergessen? [bold]katalon manage reset-admin[/]")
+    elif creds:
         console.print(f"Admin-Login: [bold]{creds}[/]")
         console.print(
             "[yellow]Passwort jetzt speichern und beim ersten Login ändern — es steht nicht in der .env. "
@@ -406,14 +409,17 @@ def _print_next_steps(dir: Path, base_url: str) -> None:
     console.print("Docs:        [bold]https://katalon-collections.github.io/katalon-docs/[/]")
 
 
-@app.command()
-def start(dir: Path | None = typer.Option(None, "--dir")):
-    """Stack starten."""
-    dir = instance_dir_or_raise(dir)
+def _start(dir: Path, show_credentials: bool = False) -> None:
     docker.compose(dir, "up", "-d")
     console.print("[green]✔[/] Stack gestartet.")
     state = InstallationState.load(dir)
-    _print_next_steps(dir, state.base_url)
+    _print_next_steps(dir, state.base_url, show_credentials=show_credentials)
+
+
+@app.command()
+def start(dir: Path | None = typer.Option(None, "--dir")):
+    """Stack starten."""
+    _start(instance_dir_or_raise(dir))
 
 
 @app.command()
@@ -463,6 +469,23 @@ def logs(
     if service:
         args.append(service)
     docker.compose(dir, *args)
+
+
+@app.command(
+    context_settings={
+        "allow_extra_args": True,
+        "ignore_unknown_options": True,
+        "help_option_names": [],
+    },
+)
+def manage(
+    ctx: typer.Context,
+    dir: Path | None = typer.Option(None, "--dir"),
+):
+    """katalon-manage im api-Container ausführen (z.B. `katalon manage reset-admin`)."""
+    dir = instance_dir_or_raise(dir)
+    result = docker.compose(dir, "exec", "api", "katalon-manage", *ctx.args, check=False)
+    raise typer.Exit(result.returncode)
 
 
 def _ensure_db_running(dir: Path, yes: bool = False) -> None:
@@ -670,9 +693,19 @@ def rollback(
     console.print("[green]✔[/] Rollback abgeschlossen.")
 
 
+def _print_update_notice() -> None:
+    notice = selfupdate.update_notice()
+    if notice:
+        Console(stderr=True).print(f"\n[yellow]{notice}[/]")
+
+
 def main() -> None:
     try:
-        app()
+        try:
+            app()
+        finally:
+            if sys.argv[1:2] not in (["logs"], ["manage"]):
+                _print_update_notice()
     except (OSError, ValueError, docker.DockerError, backup_mod.BackupError) as exc:
         console.print(f"[red]✖[/] {exc}")
         raise SystemExit(1) from exc

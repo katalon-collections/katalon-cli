@@ -531,3 +531,63 @@ def test_check_updates_reports_available_and_current_release(tmp_path: Path):
     assert "1.1.0" in available.output
     assert current.exit_code == 0
     assert "Bereits auf aktueller Version 1.0.0" in current.output
+
+
+def test_manage_passes_args_to_api_container(tmp_path):
+    from unittest.mock import patch
+    from subprocess import CompletedProcess
+    from typer.testing import CliRunner
+    from katalon_cli.main import app
+
+    (tmp_path / "installation.json").write_text("{}")
+    with patch("katalon_cli.main.docker.compose") as compose:
+        compose.return_value = CompletedProcess([], 3)
+        result = CliRunner().invoke(
+            app, ["manage", "--dir", str(tmp_path), "create-user", "--help"]
+        )
+    compose.assert_called_once_with(
+        tmp_path, "exec", "api", "katalon-manage", "create-user", "--help", check=False
+    )
+    assert result.exit_code == 3
+
+
+def test_selfupdate_is_newer():
+    from katalon_cli.core.selfupdate import is_newer
+
+    assert is_newer("0.1.19", "0.1.18")
+    assert is_newer("0.2.0", "0.1.18")
+    assert is_newer("0.1.10", "0.1.9")
+    assert not is_newer("0.1.18", "0.1.18")
+    assert not is_newer("0.1.17", "0.1.18")
+
+
+def test_selfupdate_uses_cache_and_caches_failures(tmp_path, monkeypatch):
+    from unittest.mock import patch
+    from katalon_cli.core import selfupdate
+
+    monkeypatch.setenv("XDG_CACHE_HOME", str(tmp_path))
+    with patch.object(selfupdate, "fetch_latest", return_value="9.9.9") as fetch:
+        assert selfupdate.latest_known() == "9.9.9"
+        assert selfupdate.latest_known() == "9.9.9"
+        assert fetch.call_count == 1
+
+    (tmp_path / "katalon" / "update-check.json").unlink()
+    with patch.object(selfupdate, "fetch_latest", side_effect=OSError("offline")) as fetch:
+        assert selfupdate.latest_known() is None
+        assert selfupdate.latest_known() is None
+        assert fetch.call_count == 1
+
+
+def test_selfupdate_notice_respects_env_and_tty(tmp_path, monkeypatch):
+    from unittest.mock import patch
+    from katalon_cli.core import selfupdate
+
+    monkeypatch.setenv("XDG_CACHE_HOME", str(tmp_path))
+    with patch.object(selfupdate, "latest_known", return_value="99.0.0"), \
+         patch.object(selfupdate.sys.stderr, "isatty", return_value=True):
+        assert "99.0.0" in selfupdate.update_notice()
+        monkeypatch.setenv(selfupdate.DISABLE_ENV, "1")
+        assert selfupdate.update_notice() is None
+    monkeypatch.delenv(selfupdate.DISABLE_ENV)
+    with patch.object(selfupdate, "latest_known", return_value="99.0.0"):
+        assert selfupdate.update_notice() is None  # kein TTY
