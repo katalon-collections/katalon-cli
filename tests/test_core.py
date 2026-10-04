@@ -591,3 +591,90 @@ def test_selfupdate_notice_respects_env_and_tty(tmp_path, monkeypatch):
     monkeypatch.delenv(selfupdate.DISABLE_ENV)
     with patch.object(selfupdate, "latest_known", return_value="99.0.0"):
         assert selfupdate.update_notice() is None  # kein TTY
+
+
+REINDEX_LOG = """\
+worker-1  | [2026-10-04 19:18:15,033: INFO/MainProcess] Task katalon.reindex_all[abc-123] received
+worker-1  | [2026-10-04 19:18:21,758: INFO/MainProcess] bulk_reindex_type_task: building 100 index docs for 'object' (concurrency=16)
+worker-1  | [2026-10-04 19:19:29,513: INFO/MainProcess] bulk_reindex_type_task: 40/100 docs built for 'object'
+"""
+
+
+def test_reindex_parse_progress_midway():
+    from katalon_cli.core.reindex import parse_progress
+
+    p = parse_progress(REINDEX_LOG, "abc-123", {"object": 100, "entity": 50})
+    assert p.started and not p.finished
+    assert p.current == "object"
+    assert p.total_done() == 40
+    assert sum(p.totals.values()) == 150
+
+
+def test_reindex_parse_progress_finished_and_other_task_ignored():
+    from katalon_cli.core.reindex import parse_progress
+
+    log = (
+        REINDEX_LOG
+        + "w | bulk_reindex_type_task: successfully indexed 100 records for 'object'\n"
+        + "w | Task katalon.reindex_all[abc-123] succeeded in 12.0s: {}\n"
+    )
+    p = parse_progress(log, "abc-123", {"object": 100, "entity": 50})
+    assert p.finished and not p.failed
+    assert p.type_done("object") == 100 and p.total_done() == 100
+    # fremder Task: nichts gestartet
+    assert not parse_progress(log, "other-id").started
+    # Fehlschlag
+    failed = parse_progress(REINDEX_LOG + "w | Task katalon.reindex_all[abc-123] raised RuntimeError\n", "abc-123")
+    assert failed.finished and failed.failed
+
+
+def test_dump_format_detects_custom_and_sql(tmp_path):
+    from katalon_cli.core.backup import dump_format
+
+    custom = tmp_path / "a.dump"
+    custom.write_bytes(b"PGDMP\x01\x0e")
+    sql = tmp_path / "a.sql"
+    sql.write_text("-- PostgreSQL database dump\n")
+    assert dump_format(custom) == "custom"
+    assert dump_format(sql) == "sql"
+
+
+def test_restore_dump_streams_file_and_reports_progress(tmp_path):
+    import io
+    from unittest.mock import MagicMock, patch
+    from katalon_cli.core import backup
+
+    dump = tmp_path / "a.dump"
+    dump.write_bytes(b"PGDMP" + b"x" * 2500)
+    stdin = io.BytesIO()
+    stdin.close = lambda: None  # BytesIO soll nach close() lesbar bleiben
+    proc = MagicMock(stdin=stdin)
+    proc.wait.return_value = 0
+    seen: list[int] = []
+    with patch.object(backup.docker, "compose") as compose, \
+         patch.object(backup.docker, "compose_command", return_value=["docker", "compose"]), \
+         patch.object(backup.subprocess, "Popen", return_value=proc) as popen:
+        fmt = backup.restore_dump(tmp_path, dump, on_progress=seen.append, chunk_size=1000)
+
+    assert fmt == "custom"
+    assert stdin.getvalue() == dump.read_bytes()
+    assert seen == [1000, 2000, 2505]
+    assert [c.args[1:] for c in compose.call_args_list][0][:4] == ("exec", "-T", "db", "dropdb")
+    assert "pg_restore" in popen.call_args.args[0]
+
+
+def test_restore_dump_raises_with_tool_error(tmp_path):
+    from unittest.mock import MagicMock, patch
+    import pytest
+    from katalon_cli.core import backup
+
+    dump = tmp_path / "a.sql"
+    dump.write_text("select 1;")
+    proc = MagicMock(stdin=MagicMock())
+    proc.wait.return_value = 3
+    with patch.object(backup.docker, "compose"), \
+         patch.object(backup.docker, "compose_command", return_value=["docker", "compose"]), \
+         patch.object(backup.subprocess, "Popen", return_value=proc) as popen:
+        with pytest.raises(backup.BackupError, match="psql"):
+            backup.restore_dump(tmp_path, dump)
+    assert "psql" in popen.call_args.args[0]

@@ -5,19 +5,31 @@ from __future__ import annotations
 import secrets
 import subprocess
 import sys
-from datetime import datetime, timezone
+import time
+from datetime import datetime, timedelta, timezone
 from importlib.metadata import version
 from pathlib import Path
 from urllib.parse import urlparse
 
 import typer
 from rich.console import Console
-from rich.progress import Progress, SpinnerColumn, TextColumn
+from rich.progress import (
+    BarColumn,
+    DownloadColumn,
+    Progress,
+    SpinnerColumn,
+    TaskProgressColumn,
+    TextColumn,
+    TimeElapsedColumn,
+    TimeRemainingColumn,
+    TransferSpeedColumn,
+)
 from rich.prompt import Confirm, Prompt
 from rich.table import Table
 
 from .core import backup as backup_mod
 from .core import checks, docker, release, selfupdate
+from .core import reindex as reindex_mod
 from .core.compose_gen import write_compose
 from .core.paths import default_instance_dir, save_instance_dir
 from .core.state import InstallationState, instance_dir_or_raise
@@ -693,6 +705,119 @@ def rollback(
 
     docker.compose(dir, "up", "-d")
     console.print("[green]✔[/] Rollback abgeschlossen.")
+
+
+def _run_reindex(dir: Path, wait: bool = True) -> None:
+    if not docker.is_healthy(dir, "api") or not docker.is_running(dir, "worker"):
+        console.print("[red]✖[/] API oder Worker laufen nicht — erst `katalon start`.")
+        raise typer.Exit(1)
+
+    since = datetime.now(timezone.utc) - timedelta(seconds=10)
+    totals = reindex_mod.fetch_totals(dir)
+    task_id = reindex_mod.enqueue(dir)
+    console.print(f"Reindex gestartet (Task {task_id[:8]}).")
+    if not wait:
+        console.print("Fortschritt: [bold]katalon logs worker[/]")
+        return
+
+    with Progress(
+        SpinnerColumn(),
+        TextColumn("{task.description}"),
+        BarColumn(),
+        TaskProgressColumn(),
+        TimeElapsedColumn(),
+        console=console,
+    ) as bar:
+        task = bar.add_task("Reindex", total=sum(totals.values()) if totals else None)
+
+        def _update(progress: reindex_mod.Progress) -> None:
+            total = sum(progress.totals.values()) or None
+            label = progress.current or "wartet auf Worker"
+            bar.update(task, description=f"Reindex ({label})", total=total, completed=progress.total_done())
+
+        try:
+            final = reindex_mod.follow(dir, task_id, since, totals, _update)
+        except reindex_mod.ReindexError as exc:
+            console.print(f"[red]✖[/] {exc}")
+            raise typer.Exit(1) from exc
+        bar.update(task, description="Reindex", total=bar.tasks[task].total, completed=bar.tasks[task].total)
+    indexed = sum(final.indexed.values())
+    console.print(f"[green]✔[/] Suchindex neu aufgebaut ({indexed} Datensätze).")
+
+
+@app.command()
+def reindex(
+    dir: Path | None = typer.Option(None, "--dir"),
+    wait: bool = typer.Option(True, "--wait/--no-wait", help="Auf das Ende warten und Fortschritt anzeigen."),
+):
+    """Suchindex (Elasticsearch) komplett neu aufbauen."""
+    _run_reindex(instance_dir_or_raise(dir), wait=wait)
+
+
+@app.command()
+def restore(
+    dump: Path = typer.Argument(..., exists=True, dir_okay=False, readable=True, help="pg_dump-Datei (-Fc oder SQL)."),
+    dir: Path | None = typer.Option(None, "--dir"),
+    yes: bool = typer.Option(False, "--yes"),
+    reindex: bool = typer.Option(True, "--reindex/--no-reindex", help="Danach den Suchindex neu aufbauen."),
+):
+    """Datenbank durch einen Dump ersetzen, Stack neu starten, Suchindex aufbauen."""
+    dir = instance_dir_or_raise(dir)
+    fmt = backup_mod.dump_format(dump)
+    size = dump.stat().st_size
+
+    console.print(
+        f"[yellow]⚠[/] Die aktuelle Datenbank wird durch [bold]{dump.name}[/] ersetzt "
+        f"({fmt}, {size / 1024 / 1024:.1f} MB). Vorher wird ein Backup angelegt."
+    )
+    if not yes and not Confirm.ask("Fortfahren?"):
+        raise typer.Exit(0)
+    _ensure_db_running(dir, yes=True)
+
+    backup_dir = backup_mod.create_backup(dir)
+    console.print(f"[green]✔[/] Backup der bisherigen DB: {backup_dir}")
+
+    docker.compose(dir, "stop", "nginx", "portal", "admin", "api", "worker", "beat")
+
+    with Progress(
+        SpinnerColumn(),
+        TextColumn("Restore"),
+        BarColumn(),
+        DownloadColumn(),
+        TransferSpeedColumn(),
+        TimeRemainingColumn(),
+        console=console,
+    ) as bar:
+        task = bar.add_task("restore", total=size)
+        try:
+            backup_mod.restore_dump(dir, dump, on_progress=lambda sent: bar.update(task, completed=sent))
+        except backup_mod.BackupError as exc:
+            console.print(f"[red]✖[/] {exc}")
+            console.print(f"Die vorherige DB liegt in {backup_dir / 'pg_dump.sql'} (psql-Format).")
+            raise typer.Exit(1) from exc
+        bar.update(task, completed=size)
+    console.print("[green]✔[/] Dump eingespielt.")
+
+    docker.compose(dir, "up", "-d")
+    with console.status("Warte auf API (Migrationen laufen) …"):
+        for _ in range(100):
+            if docker.is_healthy(dir, "api"):
+                break
+            time.sleep(3)
+        else:
+            console.print("[red]✖[/] API wurde nicht rechtzeitig gesund — siehe `katalon logs api`.")
+            raise typer.Exit(1)
+    console.print("[green]✔[/] Stack läuft.")
+    console.print(
+        "Benutzer und Passwörter stammen jetzt aus dem Dump — zurücksetzen mit "
+        "[bold]katalon manage reset-admin[/].\n"
+        "Verschlüsselte Felder brauchen denselben KATALON_SECRETS_KEY wie die Quell-Instanz."
+    )
+
+    if reindex:
+        _run_reindex(dir)
+    else:
+        console.print("[yellow]Suchindex ist leer[/] — aufbauen mit: [bold]katalon reindex[/]")
 
 
 def _print_update_notice() -> None:

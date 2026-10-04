@@ -22,7 +22,15 @@ katalon rollback               # letztes Backup einspielen
 katalon doctor                 # Docker, Diskspace, Ports prüfen
 katalon backup                 # manuelles Backup
 katalon logs [service]
+katalon manage <args>          # katalon-manage im api-Container (z.B. reset-admin, create-user)
+katalon restore DUMP           # DB durch pg_dump ersetzen (-Fc oder SQL), danach Reindex
+katalon reindex                # Suchindex neu aufbauen, mit Fortschrittsanzeige
 ```
+
+Ein DB-Dump enthält nicht den Suchindex (Elasticsearch). `restore` baut ihn deshalb nach dem
+Einspielen neu auf (`--no-reindex` zum Überspringen, später `katalon reindex`). Bei großen
+Beständen dauert das lange (ca. 45 Min. für 80k Datensätze). Außerdem prüft `katalon` einmal
+täglich auf neue Versionen (abschalten: `KATALON_NO_UPDATE_CHECK=1`).
 
 `install` ohne `--dir` fragt das Zielverzeichnis interaktiv ab. Nach erfolgreicher Einrichtung
 wird der absolute Pfad benutzerweit in `~/.config/katalon/instance` gespeichert.
