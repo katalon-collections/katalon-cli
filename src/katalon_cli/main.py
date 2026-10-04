@@ -403,9 +403,11 @@ def _print_next_steps(dir: Path, base_url: str, show_credentials: bool = False) 
     else:
         console.print(
             "[yellow]Admin-Login konnte nicht aus der API gelesen werden "
-            "(Container evtl. noch nicht bereit) — später mit:[/]"
+            "(Container evtl. noch nicht bereit). Die Datei wird beim nächsten API-Start gelöscht — "
+            "das Passwort steht dann nur noch im Log:[/]"
         )
-        console.print(f"  docker compose -f {dir / 'compose.yaml'} exec api cat /var/lib/katalon/first-run-credentials.txt")
+        console.print(f"  docker compose -f {dir / 'compose.yaml'} logs api | grep -A5 'KATALON FIRST RUN'")
+        console.print(f"  oder zurücksetzen: docker compose -f {dir / 'compose.yaml'} exec api katalon-manage reset-admin")
     console.print("Docs:        [bold]https://katalon-collections.github.io/katalon-docs/[/]")
 
 
