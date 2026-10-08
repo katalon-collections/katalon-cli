@@ -52,6 +52,40 @@ katalon start
 katalon status
 ```
 
+## Domain und HTTPS
+
+Für eine lokale Installation bleibt `http://localhost` mit TLS-Modus `none` der Standard.
+Bei einer öffentlichen Domain schlägt der Setup-Wizard `caddy` vor. Du kannst auch nur
+`sammlung.example.org` eingeben; mit Caddy wird daraus `https://sammlung.example.org`.
+
+Vor der Installation müssen die DNS-Einträge wirksam sein: Der A-Record zeigt auf die öffentliche
+IPv4-Adresse des Servers. Ein vorhandener AAAA-Record muss auf dessen erreichbare IPv6-Adresse
+zeigen. TCP-Ports 80 und 443 müssen frei und öffentlich erreichbar sein, auch durch Server- und
+Provider-Firewalls sowie gegebenenfalls Portweiterleitungen. Docker und Docker Compose müssen
+installiert sein. Die CLI prüft freie Ports lokal, aber keine öffentliche DNS-Auflösung oder
+Erreichbarkeit von außen.
+
+Die TLS-Modi:
+
+- `caddy`: Caddy läuft als Docker-Container vor dem internen nginx, belegt Ports 80 und 443,
+  beantragt öffentlich vertrauenswürdige Zertifikate und erneuert sie automatisch.
+  HTTP wird auf HTTPS umgeleitet. Zertifikate und Zustand liegen dauerhaft in den Docker-Volumes
+  `caddy_data` und `caddy_config`, die bei Neustarts, Updates und Rollbacks erhalten bleiben.
+  Dafür muss Caddy weiterlaufen, DNS muss stimmen und der Server erreichbar bleiben.
+- `standalone`: nginx verwendet ein selbstsigniertes Zertifikat. Browser zeigen eine Warnung;
+  es gibt keine automatische Erneuerung. Eigene Zertifikate können unter `<dir>/certs/`
+  als `fullchain.pem` und `privkey.pem` abgelegt werden. Ihre Erneuerung und das anschließende
+  Neuladen von nginx musst du selbst einrichten.
+- `behind-proxy`: Ein eigener Reverse-Proxy übernimmt HTTPS und Zertifikate.
+  Katalon ist standardmäßig nur auf `127.0.0.1:8080` erreichbar.
+- `none`: HTTP ohne TLS, für lokale Tests oder IP-Adressen.
+
+Die erste Zertifikatsausstellung kann nach dem Start kurz dauern. Bei HTTPS-Problemen:
+`katalon logs caddy`. Caddy-Konfiguration und Zertifikatsverwaltung sind in der
+[Caddy-Dokumentation](https://caddyserver.com/docs/automatic-https) beschrieben.
+Die CLI erzeugt `<dir>/Caddyfile` bei Installation, Update und Rollback neu;
+instanzspezifische Compose-Anpassungen gehören in `compose.override.yaml`.
+
 ## Entwicklung
 
 ```bash
@@ -69,7 +103,8 @@ uv run pytest
   nach (`--yes` bricht dann ab), tragen neue optionale Variablen auskommentiert in `.env` ein und
   warnen vor veralteten Variablen, die noch in der `.env` stehen.
 - `core/compose_gen.py` + `templates/compose.yaml.j2` + `templates/nginx.conf.j2` — rendert `compose.yaml`
-  + `nginx.conf` aus Version + TLS-Modus; erzeugt bei `tls_mode=standalone` ein selbstsigniertes
+  + `nginx.conf` und bei `tls_mode=caddy` das `Caddyfile` aus Version + TLS-Modus;
+  erzeugt bei `tls_mode=standalone` ein selbstsigniertes
   Zertifikat unter `<dir>/certs/` (eigenes Zertifikat dort ablegen, um es zu ersetzen).
   `install` fragt zusätzlich `MEDIA_ROOT` ab und legt `<dir>/compose.override.yaml.example` an
   (instanzspezifische Overrides — umbenennen zu `compose.override.yaml`, wird automatisch eingebunden

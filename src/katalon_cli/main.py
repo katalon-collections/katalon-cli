@@ -30,7 +30,7 @@ from rich.table import Table
 from .core import backup as backup_mod
 from .core import checks, docker, release, selfupdate
 from .core import reindex as reindex_mod
-from .core.compose_gen import write_compose
+from .core.compose_gen import caddy_host, write_compose
 from .core.paths import default_instance_dir, save_instance_dir
 from .core.state import InstallationState, instance_dir_or_raise
 
@@ -57,8 +57,9 @@ def _main(
     pass
 
 TLS_CHOICES = {
-    "standalone": "Standalone — eigenes nginx mit selbstsigniertem Zertifikat (Ports 80+443)",
-    "behind-proxy": "Hinter eigenem Reverse-Proxy — kein TLS hier",
+    "caddy": "Caddy – automatische HTTPS-Zertifikate und Erneuerung (Ports 80+443)",
+    "standalone": "Selbstsigniert – eigenes nginx, Browserwarnung, keine automatische Erneuerung (Ports 80+443)",
+    "behind-proxy": "Hinter eigenem Reverse-Proxy – Zertifikate dort verwalten",
     "none": "Kein TLS (lokal / IP)",
 }
 
@@ -247,6 +248,10 @@ def _run_checks(dir: Path, ports: list[int] | None = None, need_openssl: bool = 
 def _resolve_ports_and_base_url(
     base_url: str, tls_mode: str, is_localhost: bool
 ) -> tuple[str, list[int]]:
+    if tls_mode == "caddy":
+        base_url = urlparse(base_url)._replace(scheme="https").geturl()
+        caddy_host(base_url)
+        return base_url, [80, 443]
     if tls_mode == "standalone":
         return base_url, [80, 443]
 
@@ -308,16 +313,37 @@ def install(
         "sonst echte Domain (dann folgt TLS-Auswahl)."
     )
     base_url = Prompt.ask("KATALON_BASE_URL", default="http://localhost")
+    if "://" not in base_url:
+        base_url = f"http://{base_url}"
 
     console.print()
     console.print("MEDIA_ROOT — Verzeichnis auf dem Host, in dem Katalon Mediendateien ablegt.")
     media_root = Prompt.ask("MEDIA_ROOT", default=str(dir / "media"))
 
     is_localhost = urlparse(base_url).hostname in (None, "localhost", "127.0.0.1")
+    try:
+        caddy_host(f"https://{urlparse(base_url).hostname or ''}")
+        is_domain = True
+    except ValueError:
+        is_domain = False
     console.print()
-    for key, label in TLS_CHOICES.items():
-        console.print(f"  [cyan]{key}[/] — {label}")
-    tls_mode = Prompt.ask("TLS-Modus", choices=list(TLS_CHOICES), default="none" if is_localhost else "standalone")
+    if is_domain:
+        console.print(
+            "Für öffentliches HTTPS: Der A-Record muss auf die öffentliche IPv4-Adresse dieses Servers zeigen. "
+            "Ein vorhandener AAAA-Record muss auf seine erreichbare IPv6-Adresse zeigen. "
+            "DNS-Änderungen müssen bereits wirksam sein."
+        )
+        console.print(
+            "Für Caddy müssen TCP-Ports 80 und 443 öffentlich erreichbar sein "
+            "(Server-/Provider-Firewall, ggf. Portweiterleitung). "
+            "Caddy beantragt und erneuert Zertifikate automatisch, solange es läuft und erreichbar bleibt. "
+            "Die CLI prüft freie Ports lokal; öffentliche DNS-Auflösung und Erreichbarkeit musst du sicherstellen."
+        )
+    choices = [key for key in TLS_CHOICES if key != "caddy" or is_domain]
+    for key in choices:
+        console.print(f"  [cyan]{key}[/] – {TLS_CHOICES[key]}")
+    default_tls = "none" if is_localhost else ("caddy" if is_domain else "standalone")
+    tls_mode = Prompt.ask("TLS-Modus", choices=choices, default=default_tls)
 
     console.print()
     base_url, ports = _resolve_ports_and_base_url(base_url, tls_mode, is_localhost)
@@ -427,6 +453,11 @@ def _start(dir: Path, show_credentials: bool = False) -> None:
     docker.compose(dir, "up", "-d")
     console.print("[green]✔[/] Stack gestartet.")
     state = InstallationState.load(dir)
+    if state.tls_mode == "caddy":
+        console.print(
+            "Caddy beantragt beim ersten Start das HTTPS-Zertifikat; das kann kurz dauern. "
+            "Bei HTTPS-Problemen: [bold]katalon logs caddy[/]."
+        )
     _print_next_steps(dir, state.base_url, show_credentials=show_credentials)
 
 

@@ -116,6 +116,94 @@ def test_render_compose_none_has_no_tls_ports():
     assert '"443:443"' not in yaml
     assert "./certs:/etc/nginx/certs:ro" not in yaml
     assert '"80:80"' in yaml
+    assert "caddy" not in yaml
+
+
+def test_caddy_config_survives_regeneration(tmp_path):
+    from unittest.mock import patch
+    from katalon_cli.core.compose_gen import write_compose
+
+    with patch("katalon_cli.core.compose_gen.ensure_self_signed_cert") as cert:
+        for version in ("1.2.3", "1.2.4", "1.2.3"):
+            write_compose(tmp_path, version=version, base_url="https://sammlung.example.org", tls_mode="caddy")
+            yaml = (tmp_path / "compose.yaml").read_text()
+            nginx_block, caddy_block = yaml.split("\n  nginx:")[1].split("\n  caddy:")
+            assert "ports:" not in nginx_block
+            assert '"80:80"' in caddy_block and '"443:443"' in caddy_block
+            assert "./Caddyfile:/etc/caddy/Caddyfile:ro" in caddy_block
+            assert "caddy_data:/data" in caddy_block
+            assert "caddy_config:/config" in caddy_block
+            assert "  caddy_data:" in yaml and "  caddy_config:" in yaml
+            assert (tmp_path / "Caddyfile").read_text() == "sammlung.example.org {\n    reverse_proxy nginx:80\n}"
+        cert.assert_not_called()
+    conf = (tmp_path / "nginx.conf").read_text()
+    assert "listen 443" not in conf
+    assert conf.count("proxy_set_header X-Forwarded-Proto $http_x_forwarded_proto;") == 6
+
+
+@pytest.mark.parametrize("url", [
+    "http://example.org", "https://localhost", "https://127.0.0.1", "https://[::1]",
+    "https://app.localhost", "https://app.local", "https://*.example.org",
+    "https://example.org:8443", "https://example.org/admin", "https://user@example.org",
+    "https://example.org?x=y", "https://example.org#fragment", "https://example.org{",
+])
+def test_caddy_rejects_invalid_addresses_before_writing(tmp_path, url):
+    from katalon_cli.core.compose_gen import write_compose
+
+    with pytest.raises(ValueError):
+        write_compose(tmp_path, version="1.2.3", base_url=url, tls_mode="caddy")
+    assert list(tmp_path.iterdir()) == []
+
+
+def test_caddy_accepts_international_domain():
+    from katalon_cli.core.compose_gen import caddy_host
+
+    assert caddy_host("https://bücher.example.org/") == "xn--bcher-kva.example.org"
+
+
+@pytest.mark.parametrize("url,is_domain", [
+    ("http://localhost", False), ("http://localhost:8080", False),
+    ("https://sammlung.example.org", True), ("http://sammlung.example.org", True),
+    ("sammlung.example.org", True),
+])
+def test_install_tls_defaults_and_domain_guidance(tmp_path, monkeypatch, url, is_domain):
+    from unittest.mock import patch
+    from typer.testing import CliRunner
+    from katalon_cli.core.release import ReleaseMetadata
+    from katalon_cli.main import app
+
+    monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path / "config"))
+    instance = tmp_path / "instance"
+    meta = ReleaseMetadata(
+        version="1.0.0", minimum_installer_version="0.1.0",
+        migration_required=False, breaking=False, compose_revision=1,
+    )
+    responses = iter([url, str(instance / "media")])
+
+    def answer(label, **kwargs):
+        if label == "TLS-Modus":
+            assert kwargs["default"] == ("caddy" if is_domain else "none")
+            assert ("caddy" in kwargs["choices"]) == is_domain
+            return kwargs["default"]
+        return next(responses)
+
+    with patch("katalon_cli.main.Prompt.ask", side_effect=answer), \
+         patch("katalon_cli.main.checks.is_port_in_use", return_value=False), \
+         patch("katalon_cli.main._run_checks", return_value=True) as checks, \
+         patch("katalon_cli.main.release.get_latest_release", return_value=meta), \
+         patch("katalon_cli.main._ensure_env_vars"), \
+         patch("katalon_cli.main.Confirm.ask", return_value=False):
+        result = CliRunner().invoke(app, ["install", "--dir", str(instance)])
+    assert result.exit_code == 0, result.output
+    state = InstallationState.load(instance)
+    assert state.tls_mode == ("caddy" if is_domain else "none")
+    assert state.base_url == ("https://sammlung.example.org" if is_domain else url)
+    assert (instance / "Caddyfile").exists() == is_domain
+    assert ("A-Record" in result.output) == is_domain
+    if is_domain:
+        assert "AAAA-Record" in result.output
+        assert "Provider-Firewall" in result.output
+        checks.assert_called_once_with(instance, ports=[80, 443], need_openssl=False)
 
 
 def test_render_compose_worker_and_beat_have_elasticsearch_url():
@@ -150,6 +238,7 @@ def test_render_nginx_conf_has_absolute_redirect_off():
 
     conf = render_nginx_conf(tls_mode="none")
     assert "absolute_redirect off;" in conf
+    assert conf.count("proxy_set_header X-Forwarded-Proto $scheme;") == 6
 
 def test_state_roundtrip_and_history(tmp_path: Path):
     state = InstallationState(
@@ -266,6 +355,14 @@ def test_resolve_ports_and_base_url_standalone():
     url, ports = _resolve_ports_and_base_url("https://example.org", "standalone", False)
     assert url == "https://example.org"
     assert ports == [80, 443]
+
+
+def test_resolve_caddy_upgrades_http_to_https():
+    from katalon_cli.main import _resolve_ports_and_base_url
+
+    assert _resolve_ports_and_base_url("http://example.org", "caddy", False) == (
+        "https://example.org", [80, 443],
+    )
 
 
 def test_resolve_ports_and_base_url_localhost_port_443_busy():

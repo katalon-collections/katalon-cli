@@ -24,7 +24,7 @@ class InstallationState(BaseModel):
     version: str
     compose_revision: int
     base_url: str
-    tls_mode: str  # "standalone" | "behind-proxy" | "none"
+    tls_mode: str  # "caddy" | "standalone" | "behind-proxy" | "none"
     installed_at: datetime
     history: list[HistoryEntry] = Field(default_factory=list)
 

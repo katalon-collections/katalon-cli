@@ -159,6 +159,7 @@ services:
 {% if tls_mode == "standalone" %}
       - ./certs:/etc/nginx/certs:ro
 {% endif %}
+{% if tls_mode != "caddy" %}
     ports:
 {% if tls_mode == "standalone" %}
       - "80:80"
@@ -168,11 +169,31 @@ services:
 {% else %}
       - "{{ port or 80 }}:80"
 {% endif %}
+{% endif %}
     depends_on:
       api: { condition: service_healthy }
       admin: { condition: service_healthy }
       portal: { condition: service_healthy }
 
+{% if tls_mode == "caddy" %}
+  caddy:
+    image: caddy:2-alpine
+    restart: unless-stopped
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data
+      - caddy_config:/config
+    depends_on:
+      nginx: { condition: service_started }
+
+{% endif %}
 volumes:
   db_data:
   es_data:
+{% if tls_mode == "caddy" %}
+  caddy_data:
+  caddy_config:
+{% endif %}
