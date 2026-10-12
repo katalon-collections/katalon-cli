@@ -19,7 +19,7 @@ katalon start / stop / status
 katalon check-updates         # prüft nur, ob ein neues Release verfügbar ist
 katalon update                # interaktives Update, Backup zuerst immer
 katalon rollback               # letztes Backup einspielen
-katalon doctor                 # Docker, Diskspace, Ports prüfen
+katalon doctor                 # Docker, Diskspace, Ports, Schreibrechte von MEDIA_ROOT prüfen
 katalon backup                 # manuelles Backup
 katalon logs [service]
 katalon manage <args>          # katalon-manage im api-Container (z.B. reset-admin, create-user)
@@ -51,6 +51,23 @@ katalon install --dir ~/meine-katalon-instanz
 katalon start
 katalon status
 ```
+
+## API-Adresse
+
+Die REST-API liegt direkt unter der Base-URL, ohne `/api`-Präfix: `<KATALON_BASE_URL>/v1/...`
+(z. B. Login unter `http://127.0.0.1:8080/v1/...` bei `behind-proxy`). Unter `/api/` liegen nur
+die OpenAPI-Dokumentation (`/api/docs`, `/api/openapi.json`) und interne Endpunkte;
+`/api/v1/...` liefert für normale API-Aufrufe 404.
+
+## Medienverzeichnis und Rechte
+
+API und Worker laufen im Container als unprivilegierter User (`USER` im Image). `MEDIA_ROOT`
+ist ein Bind-Mount vom Host und muss für diesen User beschreibbar sein. `katalon start`
+(auch beim Install), `update` und `rollback` lesen UID/GID per `id` aus dem api-Container und
+setzen in einem kurzlebigen root-Container desselben Images den Eigentümer aller Einträge
+unter `MEDIA_ROOT`, die noch einem anderen Eigentümer gehören. Dateiinhalte werden nicht
+verändert; ein erneuter Lauf ändert nichts. `katalon doctor` meldet ein nicht beschreibbares
+`MEDIA_ROOT`, bevor Uploads mit HTTP 500 scheitern.
 
 ## Domain und HTTPS
 

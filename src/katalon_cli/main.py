@@ -28,7 +28,7 @@ from rich.prompt import Confirm, Prompt
 from rich.table import Table
 
 from .core import backup as backup_mod
-from .core import checks, docker, release, selfupdate
+from .core import checks, docker, permissions, release, selfupdate
 from .core import reindex as reindex_mod
 from .core.compose_gen import caddy_host, write_compose
 from .core.paths import default_instance_dir, save_instance_dir
@@ -429,6 +429,7 @@ def _print_next_steps(dir: Path, base_url: str, show_credentials: bool = False) 
     console.print()
     console.print(f"Portal:      [bold]{base_url}/[/]")
     console.print(f"Admin:       [bold]{base_url}/admin/[/]")
+    console.print(f"API:         [bold]{base_url}/v1/[/] (OpenAPI-Doku: {base_url}/api/docs)")
     creds = _first_run_credentials(dir) if show_credentials else None
     if not show_credentials:
         console.print("Admin-Passwort vergessen? [bold]katalon manage reset-admin[/]")
@@ -449,7 +450,32 @@ def _print_next_steps(dir: Path, base_url: str, show_credentials: bool = False) 
     console.print("Docs:        [bold]https://katalon-collections.github.io/katalon-docs/[/]")
 
 
+def _media_root(dir: Path) -> str:
+    value = _env_value(dir, "MEDIA_ROOT") or "./media"
+    path = Path(value)
+    return str(path if path.is_absolute() else dir / path)
+
+
+def _ensure_media_permissions(dir: Path) -> bool:
+    """Macht MEDIA_ROOT für den Container-User von API/Worker beschreibbar (idempotent).
+
+    Fehler brechen nicht ab: Der Stack startet trotzdem, nur Uploads schlagen fehl."""
+    try:
+        user = permissions.fix_media_permissions(dir)
+    except permissions.PermissionFixError as exc:
+        console.print(f"[red]✖ MEDIA_ROOT {_media_root(dir)}: {exc}[/]")
+        console.print(
+            "  Uploads schlagen sonst mit HTTP 500 fehl. Manuell beheben: "
+            f"[bold]{permissions.manual_fix_hint(_media_root(dir), None)}[/] "
+            "(UID/GID: `katalon doctor`)"
+        )
+        return False
+    console.print(f"[green]✔[/] MEDIA_ROOT beschreibbar für Container-User {user}.")
+    return True
+
+
 def _start(dir: Path, show_credentials: bool = False) -> None:
+    _ensure_media_permissions(dir)
     docker.compose(dir, "up", "-d")
     console.print("[green]✔[/] Stack gestartet.")
     state = InstallationState.load(dir)
@@ -568,7 +594,27 @@ def doctor(dir: Path | None = typer.Option(None, "--dir")):
             "[yellow]⚠ Hinweis: Port 443 ist belegt. Falls Browser http://localhost/admin/ "
             "auf https:// umleiten, Base-URL auf z. B. http://localhost:8080 anpassen.[/]"
         )
+    _check_media_writable(dir)
     docker.compose(dir, "ps")
+
+
+def _check_media_writable(dir: Path) -> bool:
+    media_root = _media_root(dir)
+    try:
+        user = permissions.container_user(dir)
+        failing = permissions.unwritable_services(dir)
+    except (permissions.PermissionFixError, docker.DockerError) as exc:
+        console.print(f"[yellow]⚠[/] MEDIA_ROOT: Prüfung nicht möglich — {exc}")
+        return False
+    if failing:
+        console.print(
+            f"[red]✖[/] MEDIA_ROOT: {media_root} ist für {', '.join(failing)} "
+            f"(Container-User {user}) nicht beschreibbar — Medien-Uploads scheitern mit HTTP 500. "
+            f"Beheben: [bold]katalon start[/] oder [bold]{permissions.manual_fix_hint(media_root, user)}[/]"
+        )
+        return False
+    console.print(f"[green]✔[/] MEDIA_ROOT: {media_root} beschreibbar für Container-User {user}")
+    return True
 
 @app.command()
 def check_updates(dir: Path | None = typer.Option(None, "--dir")):
@@ -651,6 +697,7 @@ def update(
             lambda: write_compose(dir, version=meta.version, base_url=state.base_url, tls_mode=state.tls_mode),
         ),
         ("Images pullen", lambda: docker.compose(dir, "pull")),
+        ("Medienrechte prüfen", lambda: _ensure_media_permissions(dir)),
         # DB-Migration läuft automatisch im api-Container-Entrypoint beim Start.
         ("Container neu starten", lambda: docker.compose(dir, "up", "-d")),
     ]
@@ -734,6 +781,7 @@ def rollback(
         write_compose(dir, version=previous.version, base_url=state.base_url, tls_mode=state.tls_mode)
         docker.compose(dir, "pull")
 
+    _ensure_media_permissions(dir)
     docker.compose(dir, "up", "-d")
     console.print("[green]✔[/] Rollback abgeschlossen.")
 
