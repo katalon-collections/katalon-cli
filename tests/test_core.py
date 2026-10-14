@@ -842,3 +842,32 @@ def test_render_compose_cantaloupe_never_public_by_itself():
     yaml = render_compose(version="1.2.3", base_url="http://localhost", tls_mode="none")
     assert 'CANTALOUPE_CACHE_CLIENT_PUBLIC: "false"' in yaml
     assert 'CANTALOUPE_CACHE_CLIENT_PRIVATE: "true"' in yaml
+
+
+@pytest.mark.parametrize("tls_mode", ["none", "standalone", "caddy"])
+def test_nginx_template_blocks_keep_inherited_security_headers(tls_mode):
+    """nginx: a block with its own add_header inherits none from the server level."""
+    import re
+
+    from katalon_cli.core.compose_gen import render_nginx_conf
+
+    text = re.sub(r"#[^\n]*", "", render_nginx_conf(tls_mode=tls_mode))
+    text = re.sub(r'"[^"]*"', lambda m: re.sub(r"[{};]", "_", m.group()), text)
+    stack = [{"headers": [], "inherited": []}]
+    problems, pos = [], 0
+    for match in re.finditer(r"[{};]", text):
+        chunk = text[pos:match.start()].strip()
+        if match.group() == "{":
+            parent = stack[-1]
+            stack.append({"name": chunk, "headers": [], "inherited": parent["headers"] or parent["inherited"]})
+        elif match.group() == ";":
+            parts = chunk.split()
+            if parts and parts[0] == "add_header":
+                stack[-1]["headers"].append(parts[1].lower())
+        else:
+            node = stack.pop()
+            missing = set(node["inherited"]) - set(node["headers"]) if node["headers"] else set()
+            if missing:
+                problems.append((node["name"], sorted(missing)))
+        pos = match.end()
+    assert problems == []
