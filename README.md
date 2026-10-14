@@ -69,6 +69,24 @@ unter `MEDIA_ROOT`, die noch einem anderen Eigentümer gehören. Dateiinhalte we
 verändert; ein erneuter Lauf ändert nichts. `katalon doctor` meldet ein nicht beschreibbares
 `MEDIA_ROOT`, bevor Uploads mit HTTP 500 scheitern.
 
+## Bild-Cache (Cantaloupe)
+
+Vorschaubilder und Viewer-Kacheln rechnet Cantaloupe aus den Originalen und legt sie im
+Instanzverzeichnis unter `cantaloupe-cache/` ab (abweichend: `CANTALOUPE_CACHE_DIR` in `.env`).
+Der Cache übersteht Neustarts und Updates; ein kurzlebiger Init-Container übergibt das
+Verzeichnis vor jedem Start dem Cantaloupe-User. Abgelaufene Derivate
+(`CANTALOUPE_CACHE_SERVER_DERIVATIVE_TTL_SECONDS`, Standard 30 Tage) löscht Cantaloupe selbst.
+
+Eine Größenbegrenzung kennt Cantaloupe nicht. Als Richtwert ~25 KB pro Vorschaubild plus
+Kacheln der aufgerufenen Detailansichten einplanen; wer den Platz hart begrenzen muss, legt
+`CANTALOUPE_CACHE_DIR` auf ein eigenes Dateisystem bzw. Quota-Verzeichnis. Hosts ohne
+Plattenplatz nutzen mit `CANTALOUPE_FILESYSTEMCACHE_PATHNAME=/tmpfs/cache` einen RAM-Cache
+(`CANTALOUPE_CACHE_TMPFS_SIZE`, Standard `512m`), der nach jedem Neustart leer ist.
+
+Bestehende Instanzen stellt `katalon update` automatisch um (neue `compose.yaml`); der bisherige
+RAM-Cache entfällt dabei. Releases, die eine neuere CLI voraussetzen, bricht `katalon update`
+mit einem Hinweis auf `uv tool upgrade katalon-cli` ab.
+
 ## Domain und HTTPS
 
 Für eine lokale Installation bleibt `http://localhost` mit TLS-Modus `none` der Standard.

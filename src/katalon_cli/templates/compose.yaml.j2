@@ -39,15 +39,31 @@ services:
       timeout: 10s
       retries: 20
 
+  # Legt den Derivat-Cache an und übergibt ihn dem Cantaloupe-User des Images.
+  # Ändert nur Einträge mit falschem Eigentümer (idempotent, schnell bei vollem Cache).
+  cantaloupe-cache-init:
+    image: islandora/cantaloupe:main
+    user: "0:0"
+    entrypoint: ["sh", "-c", "mkdir -p /data/cache && find /data ! -user cantaloupe -exec chown cantaloupe:cantaloupe {} +"]
+    volumes:
+      - ${CANTALOUPE_CACHE_DIR:-./cantaloupe-cache}:/data
+    restart: "no"
+
   cantaloupe:
     image: islandora/cantaloupe:main
     restart: unless-stopped
     volumes:
       - ${MEDIA_ROOT:-./media}:/var/lib/cantaloupe/images:ro
+      # Derivat-Cache auf Platte, übersteht Neustarts. Ohne Plattenplatz:
+      # CANTALOUPE_FILESYSTEMCACHE_PATHNAME=/tmpfs/cache in .env (RAM, leer nach Neustart).
+      - ${CANTALOUPE_CACHE_DIR:-./cantaloupe-cache}:/data
       - type: tmpfs
-        target: /var/lib/cantaloupe/cache
+        target: /tmpfs
         tmpfs:
           size: ${CANTALOUPE_CACHE_TMPFS_SIZE:-512m}
+          mode: 1023  # = 0o1777 (Compose liest den Wert dezimal)
+    depends_on:
+      cantaloupe-cache-init: { condition: service_completed_successfully }
     environment:
       CANTALOUPE_SOURCE_STATIC: FilesystemSource
       CANTALOUPE_FILESYSTEMSOURCE_LOOKUP_STRATEGY: BasicLookupStrategy
@@ -55,10 +71,15 @@ services:
       CANTALOUPE_BASE_URI: ${CANTALOUPE_PUBLIC_URL:-http://localhost}
       CANTALOUPE_CACHE_SERVER_DERIVATIVE: FilesystemCache
       CANTALOUPE_CACHE_SERVER_DERIVATIVE_ENABLED: "true"
-      CANTALOUPE_FILESYSTEMCACHE_PATHNAME: /var/lib/cantaloupe/cache
+      CANTALOUPE_FILESYSTEMCACHE_PATHNAME: ${CANTALOUPE_FILESYSTEMCACHE_PATHNAME:-/data/cache}
+      # Der Cache-Worker löscht Derivate älter als die TTL; ohne ihn wächst der Cache unbegrenzt.
+      CANTALOUPE_CACHE_SERVER_WORKER_ENABLED: "true"
+      CANTALOUPE_CACHE_SERVER_DERIVATIVE_TTL_SECONDS: ${CANTALOUPE_CACHE_SERVER_DERIVATIVE_TTL_SECONDS:-2592000}
       CANTALOUPE_PROCESSOR_MANUALSELECTIONSTRATEGY_JPG: Java2dProcessor
     healthcheck:
-      test: ["CMD-SHELL", "curl -sf http://localhost:8182/iiif/3"]
+      # Prüft neben der Erreichbarkeit, dass der Cantaloupe-Prozess in seinen Cache
+      # schreiben kann — sonst liefert er Bilder mit 0 Bytes bei HTTP 200.
+      test: ["CMD-SHELL", "curl -sf http://localhost:8182/iiif/3 && runuser -u cantaloupe -- sh -c 'd=$${CANTALOUPE_FILESYSTEMCACHE_PATHNAME:-/data/cache}; mkdir -p \"$$d\" && touch \"$$d/.healthcheck\" && rm -f \"$$d/.healthcheck\"'"]
       interval: 10s
       timeout: 5s
       start_period: 300s

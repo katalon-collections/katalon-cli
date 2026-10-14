@@ -456,6 +456,21 @@ def _media_root(dir: Path) -> str:
     return str(path if path.is_absolute() else dir / path)
 
 
+def _require_installer_version(minimum: str) -> None:
+    """Bricht ab, wenn das Release eine neuere CLI braucht (z. B. neues Compose-Template).
+
+    Sonst würde eine alte CLI ihr altes compose.yaml-Template schreiben und das Release
+    liefe ohne die Topologie, für die es gebaut ist."""
+    current = version("katalon-cli")
+    if selfupdate.is_newer(minimum, current):
+        console.print(
+            f"[red]✖ Dieses Release braucht katalon-cli ≥ {minimum} (installiert: {current}).[/]\n"
+            "  Zuerst aktualisieren: [bold]uv tool upgrade katalon-cli[/], dann erneut "
+            "[bold]katalon update[/]."
+        )
+        raise typer.Exit(1)
+
+
 def _ensure_media_permissions(dir: Path) -> bool:
     """Macht MEDIA_ROOT für den Container-User von API/Worker beschreibbar (idempotent).
 
@@ -630,6 +645,7 @@ def check_updates(dir: Path | None = typer.Option(None, "--dir")):
     if meta.version == state.version:
         console.print(f"[green]✔[/] Bereits auf aktueller Version {meta.version}.")
         return
+    _require_installer_version(meta.minimum_installer_version)
     console.print(f"Update verfügbar: [bold]{state.version}[/] → [bold]{meta.version}[/]")
 
 

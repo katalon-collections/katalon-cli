@@ -775,3 +775,30 @@ def test_restore_dump_raises_with_tool_error(tmp_path):
         with pytest.raises(backup.BackupError, match="psql"):
             backup.restore_dump(tmp_path, dump)
     assert "psql" in popen.call_args.args[0]
+
+
+def test_render_compose_cantaloupe_cache_on_disk_with_init_and_worker():
+    yaml = render_compose(version="1.2.3", base_url="http://localhost", tls_mode="none")
+    assert "cantaloupe-cache-init:" in yaml
+    assert "${CANTALOUPE_CACHE_DIR:-./cantaloupe-cache}:/data" in yaml
+    assert "service_completed_successfully" in yaml
+    assert 'CANTALOUPE_CACHE_SERVER_WORKER_ENABLED: "true"' in yaml
+    assert "CANTALOUPE_FILESYSTEMCACHE_PATHNAME: ${CANTALOUPE_FILESYSTEMCACHE_PATHNAME:-/data/cache}" in yaml
+    # tmpfs bleibt als Option (CANTALOUPE_FILESYSTEMCACHE_PATHNAME=/tmpfs/cache), mit
+    # dezimal angegebenem Modus 0o1777 — "1777" wäre dezimal und ergäbe kaputte Rechte.
+    assert "target: /tmpfs" in yaml
+    assert "mode: 1023" in yaml
+    # Healthcheck prüft weiterhin, dass Cantaloupe in den Cache schreiben kann.
+    assert "runuser -u cantaloupe" in yaml
+
+
+def test_update_requires_minimum_installer_version(monkeypatch):
+    import typer
+
+    from katalon_cli import main
+
+    monkeypatch.setattr(main, "version", lambda _name: "0.2.1")
+    with pytest.raises(typer.Exit):
+        main._require_installer_version("0.3.0")
+    main._require_installer_version("0.2.1")
+    main._require_installer_version("0.1.0")
