@@ -76,6 +76,10 @@ services:
       CANTALOUPE_CACHE_SERVER_WORKER_ENABLED: "true"
       CANTALOUPE_CACHE_SERVER_DERIVATIVE_TTL_SECONDS: ${CANTALOUPE_CACHE_SERVER_DERIVATIVE_TTL_SECONDS:-2592000}
       CANTALOUPE_PROCESSOR_MANUALSELECTIONSTRATEGY_JPG: Java2dProcessor
+      # Fallback ohne nginx davor: nie "public". nginx setzt Cache-Control für /iiif/
+      # nach Sichtbarkeit (X-Media-Visibility aus /v1/media/_authorize).
+      CANTALOUPE_CACHE_CLIENT_PUBLIC: "false"
+      CANTALOUPE_CACHE_CLIENT_PRIVATE: "true"
     healthcheck:
       # Prüft neben der Erreichbarkeit, dass der Cantaloupe-Prozess in seinen Cache
       # schreiben kann — sonst liefert er Bilder mit 0 Bytes bei HTTP 200.

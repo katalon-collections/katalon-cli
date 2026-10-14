@@ -822,3 +822,23 @@ def test_media_warm_thumbnails_runs_manage_command(tmp_path):
         tmp_path, "exec", "api", "katalon-manage", "warm-thumbnails", "--primary-only", check=False
     )
     assert result.exit_code == 0
+
+
+def test_render_nginx_conf_sets_iiif_cache_control_by_visibility():
+    from katalon_cli.core.compose_gen import render_nginx_conf
+
+    conf = render_nginx_conf(tls_mode="none")
+    assert "map $media_visibility $iiif_cache_control" in conf
+    iiif = conf[conf.index("location /iiif/ {"):]
+    iiif = iiif[: iiif.index("\n    }\n")]
+    assert "auth_request_set $media_visibility $upstream_http_x_media_visibility;" in iiif
+    assert "proxy_hide_header Cache-Control;" in iiif
+    assert "add_header Cache-Control $iiif_cache_control;" in iiif
+    # Location-level add_header drops the server-level security headers: repeated.
+    assert 'add_header X-Content-Type-Options "nosniff" always;' in iiif
+
+
+def test_render_compose_cantaloupe_never_public_by_itself():
+    yaml = render_compose(version="1.2.3", base_url="http://localhost", tls_mode="none")
+    assert 'CANTALOUPE_CACHE_CLIENT_PUBLIC: "false"' in yaml
+    assert 'CANTALOUPE_CACHE_CLIENT_PRIVATE: "true"' in yaml
