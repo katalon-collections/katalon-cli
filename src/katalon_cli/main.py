@@ -456,6 +456,21 @@ def _media_root(dir: Path) -> str:
     return str(path if path.is_absolute() else dir / path)
 
 
+def _require_installer_version(minimum: str) -> None:
+    """Bricht ab, wenn das Release eine neuere CLI braucht (z. B. neues Compose-Template).
+
+    Sonst würde eine alte CLI ihr altes compose.yaml-Template schreiben und das Release
+    liefe ohne die Topologie, für die es gebaut ist."""
+    current = version("katalon-cli")
+    if selfupdate.is_newer(minimum, current):
+        console.print(
+            f"[red]✖ Dieses Release braucht katalon-cli ≥ {minimum} (installiert: {current}).[/]\n"
+            "  Zuerst aktualisieren: [bold]uv tool upgrade katalon-cli[/], dann erneut "
+            "[bold]katalon update[/]."
+        )
+        raise typer.Exit(1)
+
+
 def _ensure_media_permissions(dir: Path) -> bool:
     """Macht MEDIA_ROOT für den Container-User von API/Worker beschreibbar (idempotent).
 
@@ -559,6 +574,32 @@ def manage(
     raise typer.Exit(result.returncode)
 
 
+media_app = typer.Typer(no_args_is_help=True, help="Medien: Vorschaubilder vorberechnen.")
+app.add_typer(media_app, name="media")
+
+
+@media_app.command("warm-thumbnails")
+def media_warm_thumbnails(
+    dir: Path | None = typer.Option(None, "--dir"),
+    primary_only: bool = typer.Option(False, "--primary-only", help="Nur das Hauptbild jedes Objekts."),
+    restart: bool = typer.Option(False, "--restart", help="Von vorn beginnen statt fortsetzen."),
+    status: bool = typer.Option(False, "--status", help="Nur den Fortschritt anzeigen."),
+):
+    """Vorschaubilder im Cantaloupe-Cache vorberechnen (läuft im Worker, fortsetzbar).
+
+    Sinnvoll nach Installation, Massenimport oder Umstellung des Bild-Caches."""
+    dir = instance_dir_or_raise(dir)
+    args = ["warm-thumbnails"]
+    if primary_only:
+        args.append("--primary-only")
+    if restart:
+        args.append("--restart")
+    if status:
+        args.append("--status")
+    result = docker.compose(dir, "exec", "api", "katalon-manage", *args, check=False)
+    raise typer.Exit(result.returncode)
+
+
 def _ensure_db_running(dir: Path, yes: bool = False) -> None:
     if docker.is_running(dir, "db"):
         return
@@ -630,6 +671,7 @@ def check_updates(dir: Path | None = typer.Option(None, "--dir")):
     if meta.version == state.version:
         console.print(f"[green]✔[/] Bereits auf aktueller Version {meta.version}.")
         return
+    _require_installer_version(meta.minimum_installer_version)
     console.print(f"Update verfügbar: [bold]{state.version}[/] → [bold]{meta.version}[/]")
 
 

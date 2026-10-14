@@ -775,3 +775,99 @@ def test_restore_dump_raises_with_tool_error(tmp_path):
         with pytest.raises(backup.BackupError, match="psql"):
             backup.restore_dump(tmp_path, dump)
     assert "psql" in popen.call_args.args[0]
+
+
+def test_render_compose_cantaloupe_cache_on_disk_with_init_and_worker():
+    yaml = render_compose(version="1.2.3", base_url="http://localhost", tls_mode="none")
+    assert "cantaloupe-cache-init:" in yaml
+    assert "${CANTALOUPE_CACHE_DIR:-./cantaloupe-cache}:/data" in yaml
+    assert "service_completed_successfully" in yaml
+    assert 'CANTALOUPE_CACHE_SERVER_WORKER_ENABLED: "true"' in yaml
+    assert "CANTALOUPE_FILESYSTEMCACHE_PATHNAME: ${CANTALOUPE_FILESYSTEMCACHE_PATHNAME:-/data/cache}" in yaml
+    # tmpfs bleibt als Option (CANTALOUPE_FILESYSTEMCACHE_PATHNAME=/tmpfs/cache), mit
+    # dezimal angegebenem Modus 0o1777 — "1777" wäre dezimal und ergäbe kaputte Rechte.
+    assert "target: /tmpfs" in yaml
+    assert "mode: 1023" in yaml
+    # Healthcheck prüft weiterhin, dass Cantaloupe in den Cache schreiben kann.
+    assert "runuser -u cantaloupe" in yaml
+
+
+def test_update_requires_minimum_installer_version(monkeypatch):
+    import typer
+
+    from katalon_cli import main
+
+    monkeypatch.setattr(main, "version", lambda _name: "0.2.1")
+    with pytest.raises(typer.Exit):
+        main._require_installer_version("0.3.0")
+    main._require_installer_version("0.2.1")
+    main._require_installer_version("0.1.0")
+
+
+def test_media_warm_thumbnails_runs_manage_command(tmp_path):
+    from subprocess import CompletedProcess
+    from unittest.mock import patch
+
+    from typer.testing import CliRunner
+
+    from katalon_cli.main import app
+
+    (tmp_path / "installation.json").write_text("{}")
+    with patch("katalon_cli.main.docker.compose") as compose:
+        compose.return_value = CompletedProcess([], 0)
+        result = CliRunner().invoke(
+            app, ["media", "warm-thumbnails", "--dir", str(tmp_path), "--primary-only"]
+        )
+    compose.assert_called_once_with(
+        tmp_path, "exec", "api", "katalon-manage", "warm-thumbnails", "--primary-only", check=False
+    )
+    assert result.exit_code == 0
+
+
+def test_render_nginx_conf_sets_iiif_cache_control_by_visibility():
+    from katalon_cli.core.compose_gen import render_nginx_conf
+
+    conf = render_nginx_conf(tls_mode="none")
+    assert "map $media_visibility $iiif_cache_control" in conf
+    iiif = conf[conf.index("location /iiif/ {"):]
+    iiif = iiif[: iiif.index("\n    }\n")]
+    assert "auth_request_set $media_visibility $upstream_http_x_media_visibility;" in iiif
+    assert "proxy_hide_header Cache-Control;" in iiif
+    assert "add_header Cache-Control $iiif_cache_control;" in iiif
+    # Location-level add_header drops the server-level security headers: repeated.
+    assert 'add_header X-Content-Type-Options "nosniff" always;' in iiif
+
+
+def test_render_compose_cantaloupe_never_public_by_itself():
+    yaml = render_compose(version="1.2.3", base_url="http://localhost", tls_mode="none")
+    assert 'CANTALOUPE_CACHE_CLIENT_PUBLIC: "false"' in yaml
+    assert 'CANTALOUPE_CACHE_CLIENT_PRIVATE: "true"' in yaml
+
+
+@pytest.mark.parametrize("tls_mode", ["none", "standalone", "caddy"])
+def test_nginx_template_blocks_keep_inherited_security_headers(tls_mode):
+    """nginx: a block with its own add_header inherits none from the server level."""
+    import re
+
+    from katalon_cli.core.compose_gen import render_nginx_conf
+
+    text = re.sub(r"#[^\n]*", "", render_nginx_conf(tls_mode=tls_mode))
+    text = re.sub(r'"[^"]*"', lambda m: re.sub(r"[{};]", "_", m.group()), text)
+    stack = [{"headers": [], "inherited": []}]
+    problems, pos = [], 0
+    for match in re.finditer(r"[{};]", text):
+        chunk = text[pos:match.start()].strip()
+        if match.group() == "{":
+            parent = stack[-1]
+            stack.append({"name": chunk, "headers": [], "inherited": parent["headers"] or parent["inherited"]})
+        elif match.group() == ";":
+            parts = chunk.split()
+            if parts and parts[0] == "add_header":
+                stack[-1]["headers"].append(parts[1].lower())
+        else:
+            node = stack.pop()
+            missing = set(node["inherited"]) - set(node["headers"]) if node["headers"] else set()
+            if missing:
+                problems.append((node["name"], sorted(missing)))
+        pos = match.end()
+    assert problems == []
