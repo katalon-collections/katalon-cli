@@ -83,6 +83,13 @@ Kacheln der aufgerufenen Detailansichten einplanen; wer den Platz hart begrenzen
 Plattenplatz nutzen mit `CANTALOUPE_FILESYSTEMCACHE_PATHNAME=/tmpfs/cache` einen RAM-Cache
 (`CANTALOUPE_CACHE_TMPFS_SIZE`, Standard `512m`), der nach jedem Neustart leer ist.
 
+Vorschaubilder lassen sich vorab berechnen, damit schon der erste Aufruf der Trefferliste
+schnell ist: `katalon media warm-thumbnails` (Hauptbilder zuerst, dann die übrigen; mit
+`--primary-only` nur Hauptbilder, `--status` zeigt den Fortschritt). Der Lauf arbeitet im
+Worker in kleinen Paketen, belegt höchstens `THUMBNAIL_WARM_CONCURRENCY` (Standard 3)
+Cantaloupe-Kerne und setzt nach einer Unterbrechung beim letzten Stand fort. Neu hochgeladene
+Bilder werden automatisch vorberechnet.
+
 Bestehende Instanzen stellt `katalon update` automatisch um (neue `compose.yaml`); der bisherige
 RAM-Cache entfällt dabei. Releases, die eine neuere CLI voraussetzen, bricht `katalon update`
 mit einem Hinweis auf `uv tool upgrade katalon-cli` ab.

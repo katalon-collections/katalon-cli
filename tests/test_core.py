@@ -802,3 +802,23 @@ def test_update_requires_minimum_installer_version(monkeypatch):
         main._require_installer_version("0.3.0")
     main._require_installer_version("0.2.1")
     main._require_installer_version("0.1.0")
+
+
+def test_media_warm_thumbnails_runs_manage_command(tmp_path):
+    from subprocess import CompletedProcess
+    from unittest.mock import patch
+
+    from typer.testing import CliRunner
+
+    from katalon_cli.main import app
+
+    (tmp_path / "installation.json").write_text("{}")
+    with patch("katalon_cli.main.docker.compose") as compose:
+        compose.return_value = CompletedProcess([], 0)
+        result = CliRunner().invoke(
+            app, ["media", "warm-thumbnails", "--dir", str(tmp_path), "--primary-only"]
+        )
+    compose.assert_called_once_with(
+        tmp_path, "exec", "api", "katalon-manage", "warm-thumbnails", "--primary-only", check=False
+    )
+    assert result.exit_code == 0

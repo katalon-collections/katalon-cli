@@ -574,6 +574,32 @@ def manage(
     raise typer.Exit(result.returncode)
 
 
+media_app = typer.Typer(no_args_is_help=True, help="Medien: Vorschaubilder vorberechnen.")
+app.add_typer(media_app, name="media")
+
+
+@media_app.command("warm-thumbnails")
+def media_warm_thumbnails(
+    dir: Path | None = typer.Option(None, "--dir"),
+    primary_only: bool = typer.Option(False, "--primary-only", help="Nur das Hauptbild jedes Objekts."),
+    restart: bool = typer.Option(False, "--restart", help="Von vorn beginnen statt fortsetzen."),
+    status: bool = typer.Option(False, "--status", help="Nur den Fortschritt anzeigen."),
+):
+    """Vorschaubilder im Cantaloupe-Cache vorberechnen (läuft im Worker, fortsetzbar).
+
+    Sinnvoll nach Installation, Massenimport oder Umstellung des Bild-Caches."""
+    dir = instance_dir_or_raise(dir)
+    args = ["warm-thumbnails"]
+    if primary_only:
+        args.append("--primary-only")
+    if restart:
+        args.append("--restart")
+    if status:
+        args.append("--status")
+    result = docker.compose(dir, "exec", "api", "katalon-manage", *args, check=False)
+    raise typer.Exit(result.returncode)
+
+
 def _ensure_db_running(dir: Path, yes: bool = False) -> None:
     if docker.is_running(dir, "db"):
         return
