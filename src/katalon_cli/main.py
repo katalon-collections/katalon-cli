@@ -490,6 +490,9 @@ def _ensure_media_permissions(dir: Path) -> bool:
 
 
 def _start(dir: Path, show_credentials: bool = False) -> None:
+    # Ohne capture: Fortschritt sichtbar, sonst wirkt der erste Image-Pull wie ein Hänger.
+    console.print("Lade Images (beim ersten Start einige Minuten) …")
+    docker.compose(dir, "pull")
     _ensure_media_permissions(dir)
     docker.compose(dir, "up", "-d")
     console.print("[green]✔[/] Stack gestartet.")

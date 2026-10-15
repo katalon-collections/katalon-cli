@@ -138,7 +138,7 @@ def test_start_fixes_permissions_before_up(tmp_path):
          patch("katalon_cli.main.docker.compose", side_effect=lambda d, *a, **k: order.append(a[0])):
         result = CliRunner().invoke(app, ["start", "--dir", str(dir)])
     assert result.exit_code == 0, result.output
-    assert order[:2] == ["fix", "up"]
+    assert order[:3] == ["pull", "fix", "up"]
     assert "1000:1000 (app)" in result.output
 
 
@@ -151,7 +151,7 @@ def test_start_continues_with_clear_message_when_fix_fails(tmp_path):
          patch("katalon_cli.main.docker.compose") as compose:
         result = CliRunner(env={"COLUMNS": "300"}).invoke(app, ["start", "--dir", str(dir)])
     assert result.exit_code == 0, result.output
-    assert compose.call_args_list[0].args[1:] == ("up", "-d")
+    assert [c.args[1] for c in compose.call_args_list[:2]] == ["pull", "up"]
     assert "/srv/media" in result.output and "chown -R" in result.output
 
 

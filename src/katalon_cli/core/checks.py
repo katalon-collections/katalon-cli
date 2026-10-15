@@ -26,6 +26,8 @@ def check_docker() -> CheckResult:
 
 
 def check_compose() -> CheckResult:
+    if not shutil.which("docker"):
+        return CheckResult("Docker Compose", False, "Docker fehlt")
     probe = subprocess.run(["docker", "compose", "version"], capture_output=True, text=True)
     if probe.returncode == 0:
         return CheckResult("Docker Compose", True, probe.stdout.strip())
