@@ -540,6 +540,11 @@ def status(dir: Path | None = typer.Option(None, "--dir")):
     table.add_row("TLS-Modus", state.tls_mode)
     table.add_row("Installiert", str(state.installed_at))
     console.print(table)
+    if (_env_value(dir, "OAI_ADMIN_EMAIL") or "").strip() in {"", "admin@katalon.dev"}:
+        console.print(
+            "[yellow]⚠ OAI_ADMIN_EMAIL ist nicht gesetzt – OAI-PMH meldet die Platzhalteradresse "
+            "admin@katalon.dev. In .env eintragen und mit [bold]katalon start[/] übernehmen.[/]"
+        )
 
     docker.compose(dir, "ps")
 

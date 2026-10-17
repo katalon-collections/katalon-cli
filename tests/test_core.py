@@ -871,3 +871,30 @@ def test_nginx_template_blocks_keep_inherited_security_headers(tls_mode):
                 problems.append((node["name"], sorted(missing)))
         pos = match.end()
     assert problems == []
+
+
+def test_status_warns_while_oai_admin_email_is_placeholder(tmp_path: Path):
+    from unittest.mock import patch
+
+    from typer.testing import CliRunner
+
+    from katalon_cli.main import app
+
+    InstallationState(
+        version="1.0.0",
+        compose_revision=1,
+        base_url="http://localhost",
+        tls_mode="none",
+        installed_at=datetime.now(UTC),
+    ).save(tmp_path)
+    runner = CliRunner()
+    with patch("katalon_cli.main.docker.compose"):
+        (tmp_path / ".env").write_text("SECRET_KEY=x\n")
+        unset = runner.invoke(app, ["status", "--dir", str(tmp_path)])
+        (tmp_path / ".env").write_text("OAI_ADMIN_EMAIL=sammlung@example.org\n")
+        configured = runner.invoke(app, ["status", "--dir", str(tmp_path)])
+
+    assert unset.exit_code == 0
+    assert "OAI_ADMIN_EMAIL" in unset.output
+    assert configured.exit_code == 0
+    assert "OAI_ADMIN_EMAIL" not in configured.output
