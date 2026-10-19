@@ -2,6 +2,14 @@
 
 Format nach [Keep a Changelog](https://keepachangelog.com/de/1.1.0/). Nachträglich aus der Git-Historie erstellt; Versionen ohne eigenen Tag (0.1.1–0.1.3, 0.2.0) fehlen oder sind in der nächsten Version enthalten.
 
+## [0.3.2] – 2026-10-19
+
+### Behoben
+- `katalon reindex`: Fortschritt und Ergebnis werden auch mit dem Logformat ab Katalon 1.42 erkannt. Zuvor meldete der Befehl „0 Datensätze“, obwohl der Index vollständig neu aufgebaut war. Er zeigt jetzt die Zahl je Typ und warnt, wenn nichts indiziert wurde.
+
+### Hinzugefügt
+- `katalon update` liest `reindex_required` aus `katalon-release.json` und bietet danach den Neuaufbau des Suchindex an; `--reindex` startet ihn ohne Nachfrage.
+
 ## [0.3.1] – 2026-10-15
 
 ### Behoben
