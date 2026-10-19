@@ -725,6 +725,32 @@ def test_reindex_parse_progress_finished_and_other_task_ignored():
     assert failed.finished and failed.failed
 
 
+# Katalon >= 1.42 (Alias-Swap-Rebuild), gekürzt aus einem echten Lauf vom 2026-10-19.
+REINDEX_LOG_142 = """\
+worker-1  | [2026-10-19 09:58:04,477: INFO/MainProcess] Task katalon.reindex_all[abc-123] received
+worker-1  | [2026-10-19 09:58:10,001: INFO/MainProcess] bulk_reindex_type_task: streaming 31815 docs for 'object' (batch=500, concurrency=16)
+worker-1  | [2026-10-19 10:10:00,001: INFO/MainProcess] bulk_reindex_type_task: 12000/31815 docs for 'object'
+"""
+
+
+def test_reindex_parse_progress_katalon_142_log_format():
+    from katalon_cli.core.reindex import parse_progress
+
+    p = parse_progress(REINDEX_LOG_142, "abc-123", {"object": 31815, "entity": 10013})
+    assert p.current == "object" and p.total_done() == 12000
+
+    log = (
+        REINDEX_LOG_142
+        + "w | bulk_reindex_type_task: indexed 31815, removed 0 stale for 'object'\n"
+        + "w | Task katalon.reindex_all[abc-123] succeeded in 3098.5s: {'status': 'ok', "
+        "'types': {'object': {'status': 'ok', 'indexed': 31815, 'removed': 0}, "
+        "'entity': {'status': 'ok', 'indexed': 10013, 'removed': 0}}}\n"
+    )
+    p = parse_progress(log, "abc-123", {"object": 31815, "entity": 10013})
+    assert p.finished and not p.failed
+    assert p.indexed == {"object": 31815, "entity": 10013}
+
+
 def test_dump_format_detects_custom_and_sql(tmp_path):
     from katalon_cli.core.backup import dump_format
 
@@ -871,3 +897,12 @@ def test_nginx_template_blocks_keep_inherited_security_headers(tls_mode):
                 problems.append((node["name"], sorted(missing)))
         pos = match.end()
     assert problems == []
+
+
+def test_release_metadata_reindex_required_defaults_to_false():
+    from katalon_cli.core.release import ReleaseMetadata
+
+    base = {"version": "1.43.1", "minimum_installer_version": "0.3.0", "migration_required": False,
+            "breaking": False, "compose_revision": 3}
+    assert ReleaseMetadata.model_validate(base).reindex_required is False  # ältere katalon-release.json
+    assert ReleaseMetadata.model_validate({**base, "reindex_required": True}).reindex_required is True

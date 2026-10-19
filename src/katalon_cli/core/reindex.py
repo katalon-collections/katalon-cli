@@ -49,10 +49,15 @@ finally:
     _run(engine.dispose())
 """
 
-_BUILDING = re.compile(r"building (\d+) index docs for '(\w+)'")
-_BUILT = re.compile(r"(\d+)/(\d+) docs built for '(\w+)'")
-_INDEXED = re.compile(r"successfully indexed (\d+) records for '(\w+)'")
+# Logzeilen von bulk_reindex_type_task. Katalon >= 1.42 (Alias-Swap-Rebuild) loggt
+# "streaming N docs", "n/N docs" und "indexed N, removed M stale"; ältere Versionen
+# "building N index docs", "n/N docs built" und "successfully indexed N records".
+_BUILDING = re.compile(r"(?:building|streaming) (\d+) (?:index )?docs for '(\w+)'")
+_BUILT = re.compile(r"(\d+)/(\d+) docs (?:built )?for '(\w+)'")
+_INDEXED = re.compile(r"(?:successfully indexed (\d+) records|indexed (\d+), removed \d+ stale) for '(\w+)'")
 _FINISHED = re.compile(r"Task katalon\.reindex_all\[(?P<id>[0-9a-f-]+)\] (?P<state>succeeded|raised|failed)")
+# Ergebnis von reindex_all ab Katalon 1.42: {..., 'types': {'object': {'indexed': 31815, ...}}}
+_RESULT_INDEXED = re.compile(r"'(\w+)': \{'status': '\w+', 'indexed': (\d+)")
 _RECEIVED = re.compile(r"Task katalon\.reindex_all\[(?P<id>[0-9a-f-]+)\] received")
 
 
@@ -98,10 +103,13 @@ def parse_progress(log_text: str, task_id: str, known_totals: dict[str, int] | N
             progress.current = m[3]
             progress.built[m[3]] = int(m[1])
         elif (m := _INDEXED.search(line)):
-            progress.indexed[m[2]] = int(m[1])
+            progress.indexed[m[3]] = int(m[1] or m[2])
         elif (m := _FINISHED.search(line)) and m["id"] == task_id:
             progress.finished = True
             progress.failed = m["state"] != "succeeded"
+            # Das Task-Ergebnis ist die verlässlichste Quelle für die Endzahlen.
+            for rtype, count in _RESULT_INDEXED.findall(line[m.end():]):
+                progress.indexed[rtype] = int(count)
     return progress
 
 

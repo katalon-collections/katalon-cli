@@ -683,6 +683,9 @@ def update(
     dir: Path | None = typer.Option(None, "--dir"),
     target: str = typer.Option(None, "--target", help="Zielversion, default = latest"),
     yes: bool = typer.Option(False, "--yes", help="Ohne Rückfrage"),
+    reindex: bool = typer.Option(
+        False, "--reindex", help="Suchindex nach dem Update neu aufbauen, wenn das Release es verlangt."
+    ),
 ):
     """Update auf neue Version — Backup zuerst, immer."""
     dir = instance_dir_or_raise(dir)
@@ -714,6 +717,12 @@ def update(
         console.print("[red]⚠ Breaking Change in diesem Release.[/]")
     if meta.migration_required:
         console.print("[yellow]⚠ DB-Migration erforderlich.[/]")
+    reindex_needed = any(item.reindex_required for item in update_releases) or meta.reindex_required
+    if reindex_needed:
+        console.print(
+            "[yellow]⚠ Suchindex muss danach neu aufgebaut werden. Bis dahin liefern OAI und "
+            "Exporte langsamer (Aufbau aus der Datenbank).[/]"
+        )
     if meta.compose_revision != state.compose_revision:
         console.print(
             f"[yellow]⚠ compose.yaml wird neu generiert "
@@ -782,6 +791,12 @@ def update(
     if notes:
         console.rule("Changelog")
         console.print(notes)
+
+    if reindex_needed:
+        if reindex or (not yes and Confirm.ask("Suchindex jetzt neu aufbauen?", default=True)):
+            _run_reindex(dir)
+        else:
+            console.print("[yellow]⚠ Suchindex neu aufbauen:[/] [bold]katalon reindex[/]")
 
     _print_next_steps(dir, state.base_url)
 
@@ -866,7 +881,14 @@ def _run_reindex(dir: Path, wait: bool = True) -> None:
             raise typer.Exit(1) from exc
         bar.update(task, description="Reindex", total=bar.tasks[task].total, completed=bar.tasks[task].total)
     indexed = sum(final.indexed.values())
-    console.print(f"[green]✔[/] Suchindex neu aufgebaut ({indexed} Datensätze).")
+    if not indexed:
+        console.print(
+            "[yellow]⚠[/] Reindex beendet, aber keine indizierten Datensätze erkannt — "
+            "bitte prüfen: [bold]katalon logs worker[/]"
+        )
+        return
+    per_type = ", ".join(f"{t} {n}" for t, n in final.indexed.items())
+    console.print(f"[green]✔[/] Suchindex neu aufgebaut ({indexed} Datensätze: {per_type}).")
 
 
 @app.command()

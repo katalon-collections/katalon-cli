@@ -34,6 +34,8 @@ class ReleaseMetadata(BaseModel):
     version: str
     minimum_installer_version: str
     migration_required: bool
+    # Suchindex-Kopien der Vorversion sind veraltet (Katalon >= 1.43.2); fehlt bei älteren Releases.
+    reindex_required: bool = False
     breaking: bool
     compose_revision: int
     requires: ReleaseRequirements = ReleaseRequirements()
