@@ -906,3 +906,19 @@ def test_release_metadata_reindex_required_defaults_to_false():
             "breaking": False, "compose_revision": 3}
     assert ReleaseMetadata.model_validate(base).reindex_required is False  # ältere katalon-release.json
     assert ReleaseMetadata.model_validate({**base, "reindex_required": True}).reindex_required is True
+
+
+@pytest.mark.parametrize("tls_mode", ["none", "standalone", "caddy"])
+def test_render_nginx_conf_hides_version_and_sets_transport_headers(tls_mode):
+    from katalon_cli.core.compose_gen import render_nginx_conf
+
+    conf = render_nginx_conf(tls_mode=tls_mode)
+    assert "server_tokens off;" in conf
+    assert 'add_header Strict-Transport-Security "max-age=31536000; includeSubDomains" always;' in conf
+    assert 'add_header Cross-Origin-Opener-Policy "same-origin" always;' in conf
+    assert 'add_header Cross-Origin-Resource-Policy "same-origin" always;' in conf
+    # COEP require-corp would block external IIIF images and map tiles.
+    assert "Cross-Origin-Embedder-Policy" not in conf
+    iiif = conf[conf.index("location /iiif/ {"):]
+    iiif = iiif[: iiif.index("\n    }\n")]
+    assert 'add_header Cross-Origin-Resource-Policy "cross-origin" always;' in iiif

@@ -2,6 +2,11 @@
 
 Format nach [Keep a Changelog](https://keepachangelog.com/de/1.1.0/). Nachträglich aus der Git-Historie erstellt; Versionen ohne eigenen Tag (0.1.1–0.1.3, 0.2.0) fehlen oder sind in der nächsten Version enthalten.
 
+## [Unreleased]
+
+### Behoben
+- nginx-Template: `server_tokens off`, außerdem `Strict-Transport-Security`, `Cross-Origin-Opener-Policy` und `Cross-Origin-Resource-Policy`, wie in `docker/nginx.conf` von Katalon. Zuvor nannte nginx seine Version, und HSTS fehlte (ZAP-Scan, karkraeg/Katalon#433). `/iiif/` sendet `Cross-Origin-Resource-Policy: cross-origin`, damit andere Seiten die Bilder einbinden können. Wirkt nach `katalon update`, das `nginx.conf` neu rendert.
+
 ## [0.3.2] – 2026-10-19
 
 ### Behoben
