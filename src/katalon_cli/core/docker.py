@@ -45,6 +45,12 @@ def compose(
     )
 
 
+def reload_nginx(instance_dir: Path) -> None:
+    """`up -d` erstellt nginx nicht neu, wenn nur die gemountete nginx.conf sich ändert."""
+    compose(instance_dir, "exec", "-T", "nginx", "nginx", "-t")
+    compose(instance_dir, "exec", "-T", "nginx", "nginx", "-s", "reload")
+
+
 def is_healthy(instance_dir: Path, service: str = "api") -> bool:
     result = compose(
         instance_dir, "ps", "--format", "json", service, check=False, capture=True

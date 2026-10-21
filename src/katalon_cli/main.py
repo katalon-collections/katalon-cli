@@ -755,6 +755,7 @@ def update(
         ("Medienrechte prüfen", lambda: _ensure_media_permissions(dir)),
         # DB-Migration läuft automatisch im api-Container-Entrypoint beim Start.
         ("Container neu starten", lambda: docker.compose(dir, "up", "-d")),
+        ("nginx-Konfiguration neu laden", lambda: docker.reload_nginx(dir)),
     ]
 
     with Progress(SpinnerColumn(), TextColumn("[progress.description]{task.description}"), console=console) as progress:
@@ -844,6 +845,7 @@ def rollback(
 
     _ensure_media_permissions(dir)
     docker.compose(dir, "up", "-d")
+    docker.reload_nginx(dir)
     console.print("[green]✔[/] Rollback abgeschlossen.")
 
 

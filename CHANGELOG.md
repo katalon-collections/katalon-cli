@@ -5,6 +5,7 @@ Format nach [Keep a Changelog](https://keepachangelog.com/de/1.1.0/). Nachträgl
 ## [0.3.4] – 2026-10-21
 
 ### Behoben
+- `katalon update` und `katalon rollback` laden nginx nach `up -d` neu (`nginx -t`, `nginx -s reload`). Zuvor blieb der Container bei geänderter `nginx.conf` unverändert und lief mit der alten Konfiguration weiter, etwa ohne die Header aus 0.3.3.
 - `katalon update` und `katalon reindex` prüfen vorab alle Dateisysteme des Servers und brechen ab, wenn eines zu 90 % oder mehr belegt ist. Elasticsearch verweigert ab dieser Schwelle die Shard-Allokation; der Reindex scheiterte zuvor mit einem Timeout beim Anlegen des Index, ohne die Platte als Ursache zu nennen.
 
 ## [0.3.3] – 2026-10-21

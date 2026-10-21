@@ -936,3 +936,28 @@ def test_check_server_disk_flags_full_mount(monkeypatch, tmp_path):
     )
     result = checks.check_server_disk(tmp_path)
     assert not result.ok and "/data 92 %" in result.detail and str(tmp_path) not in result.detail
+
+
+def test_reload_nginx_tests_config_before_reload(tmp_path):
+    import subprocess
+    from unittest.mock import patch
+
+    from katalon_cli.core import docker
+
+    calls = []
+
+    def fake(_dir, *args, **_kw):
+        calls.append(args)
+        if args[-1] == "-t":
+            raise subprocess.CalledProcessError(1, "nginx")
+
+    with patch.object(docker, "compose", fake):
+        with pytest.raises(subprocess.CalledProcessError):
+            docker.reload_nginx(tmp_path)
+        assert calls == [("exec", "-T", "nginx", "nginx", "-t")]
+
+        calls.clear()
+        fake_ok = lambda _d, *a, **_k: calls.append(a)  # noqa: E731
+        with patch.object(docker, "compose", fake_ok):
+            docker.reload_nginx(tmp_path)
+        assert calls[-1] == ("exec", "-T", "nginx", "nginx", "-s", "reload")
