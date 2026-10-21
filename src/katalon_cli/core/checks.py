@@ -9,6 +9,9 @@ from dataclasses import dataclass
 from pathlib import Path
 
 MIN_FREE_DISK_GB = 5
+# Elasticsearch verweigert Shard-Allokation ab 90 % (high watermark).
+MAX_USED_PERCENT = 90
+REAL_FS = {"ext2", "ext3", "ext4", "xfs", "btrfs", "zfs", "f2fs"}
 
 
 @dataclass
@@ -48,6 +51,32 @@ def check_disk_space(path: Path, min_gb: int = MIN_FREE_DISK_GB) -> CheckResult:
     return CheckResult(
         "Diskspace", ok, f"{free_gb:.1f} GB frei (min. {min_gb} GB) in {path}"
     )
+
+def _mount_points(instance_dir: Path) -> list[Path]:
+    """Alle echten Dateisysteme des Hosts; ohne /proc/mounts Instanzverzeichnis und `/`."""
+    try:
+        lines = Path("/proc/mounts").read_text().splitlines()
+    except OSError:
+        return [instance_dir, Path("/")]
+    return [Path(f[1].replace("\\040", " ")) for f in map(str.split, lines) if f[2] in REAL_FS]
+
+
+def check_server_disk(instance_dir: Path, max_used: int = MAX_USED_PERCENT) -> CheckResult:
+    full = []
+    for mount in _mount_points(instance_dir):
+        try:
+            usage = shutil.disk_usage(mount)
+        except OSError:
+            continue
+        used = usage.used * 100 / (usage.used + usage.free)
+        if used >= max_used:
+            full.append(f"{mount} {used:.0f} %")
+    if full:
+        return CheckResult(
+            "Server-Disk", False, f"≥ {max_used} % belegt: {', '.join(full)} — Elasticsearch blockiert ab 90 %"
+        )
+    return CheckResult("Server-Disk", True, f"alle Dateisysteme < {max_used} % belegt")
+
 
 def check_openssl() -> CheckResult:
     if not shutil.which("openssl"):

@@ -2,6 +2,11 @@
 
 Format nach [Keep a Changelog](https://keepachangelog.com/de/1.1.0/). Nachträglich aus der Git-Historie erstellt; Versionen ohne eigenen Tag (0.1.1–0.1.3, 0.2.0) fehlen oder sind in der nächsten Version enthalten.
 
+## [0.3.4] – 2026-10-21
+
+### Behoben
+- `katalon update` und `katalon reindex` prüfen vorab alle Dateisysteme des Servers und brechen ab, wenn eines zu 90 % oder mehr belegt ist. Elasticsearch verweigert ab dieser Schwelle die Shard-Allokation; der Reindex scheiterte zuvor mit einem Timeout beim Anlegen des Index, ohne die Platte als Ursache zu nennen.
+
 ## [0.3.3] – 2026-10-21
 
 ### Behoben

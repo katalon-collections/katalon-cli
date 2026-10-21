@@ -689,6 +689,7 @@ def update(
 ):
     """Update auf neue Version — Backup zuerst, immer."""
     dir = instance_dir_or_raise(dir)
+    _require_disk(dir)
     state = InstallationState.load(dir)
     try:
         meta = release.get_release(target) if target else release.get_latest_release()
@@ -846,7 +847,15 @@ def rollback(
     console.print("[green]✔[/] Rollback abgeschlossen.")
 
 
+def _require_disk(dir: Path) -> None:
+    result = checks.check_server_disk(dir)
+    if not result.ok:
+        console.print(f"[red]✖[/] {result.name}: {result.detail}")
+        raise typer.Exit(1)
+
+
 def _run_reindex(dir: Path, wait: bool = True) -> None:
+    _require_disk(dir)
     if not docker.is_healthy(dir, "api") or not docker.is_running(dir, "worker"):
         console.print("[red]✖[/] API oder Worker laufen nicht — erst `katalon start`.")
         raise typer.Exit(1)

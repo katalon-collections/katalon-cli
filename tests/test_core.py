@@ -922,3 +922,17 @@ def test_render_nginx_conf_hides_version_and_sets_transport_headers(tls_mode):
     iiif = conf[conf.index("location /iiif/ {"):]
     iiif = iiif[: iiif.index("\n    }\n")]
     assert 'add_header Cross-Origin-Resource-Policy "cross-origin" always;' in iiif
+
+
+def test_check_server_disk_flags_full_mount(monkeypatch, tmp_path):
+    from collections import namedtuple
+
+    from katalon_cli.core import checks
+
+    usage = namedtuple("usage", "total used free")
+    monkeypatch.setattr(checks, "_mount_points", lambda _d: [tmp_path, Path("/data")])
+    monkeypatch.setattr(
+        checks.shutil, "disk_usage", lambda p: usage(100, 92, 8) if str(p) == "/data" else usage(100, 10, 90)
+    )
+    result = checks.check_server_disk(tmp_path)
+    assert not result.ok and "/data 92 %" in result.detail and str(tmp_path) not in result.detail
