@@ -19,11 +19,15 @@ server {
 {% endif %}
     client_max_body_size 500m;
     absolute_redirect off;
+    server_tokens off;
     add_header Content-Security-Policy "default-src 'self'; base-uri 'self'; object-src 'none'; frame-ancestors 'self'; form-action 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; font-src 'self' data:; img-src 'self' data: blob: https:; media-src 'self' blob: https:; connect-src 'self' https:; frame-src 'self' https://www.openstreetmap.org; worker-src 'self' blob:" always;
     add_header Referrer-Policy "strict-origin-when-cross-origin" always;
     add_header X-Content-Type-Options "nosniff" always;
     add_header X-Frame-Options "SAMEORIGIN" always;
     add_header Permissions-Policy "camera=(), geolocation=(), microphone=()" always;
+    add_header Strict-Transport-Security "max-age=31536000; includeSubDomains" always;
+    add_header Cross-Origin-Opener-Policy "same-origin" always;
+    add_header Cross-Origin-Resource-Policy "same-origin" always;
 
     location /api/ {
         set $upstream_api api:8000;
@@ -97,6 +101,10 @@ server {
         add_header X-Content-Type-Options "nosniff" always;
         add_header X-Frame-Options "SAMEORIGIN" always;
         add_header Permissions-Policy "camera=(), geolocation=(), microphone=()" always;
+        add_header Strict-Transport-Security "max-age=31536000; includeSubDomains" always;
+        add_header Cross-Origin-Opener-Policy "same-origin" always;
+        # IIIF images are meant to be embedded by other sites; access is decided by auth_request.
+        add_header Cross-Origin-Resource-Policy "cross-origin" always;
     }
 
     location = /internal/media-authorize {
