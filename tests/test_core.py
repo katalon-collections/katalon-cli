@@ -969,3 +969,5 @@ def test_render_compose_cantaloupe_pinned_and_quiet():
     assert yaml.count("islandora/cantaloupe:7.0.22") == 2
     assert "CANTALOUPE_LOG_APPLICATION_LEVEL: ${CANTALOUPE_LOG_LEVEL:-info}" in yaml
     assert 'CANTALOUPE_LOG_ACCESS_CONSOLEAPPENDER_ENABLED: "false"' in yaml
+    assert "CANTALOUPE_HEAP_MIN: ${CANTALOUPE_HEAP_MIN:-256m}" in yaml
+    assert "CANTALOUPE_HEAP_MAX: ${CANTALOUPE_HEAP_MAX:-1g}" in yaml

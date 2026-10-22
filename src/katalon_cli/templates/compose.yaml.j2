@@ -65,6 +65,10 @@ services:
     depends_on:
       cantaloupe-cache-init: { condition: service_completed_successfully }
     environment:
+      # Image-Default wäre 3G/5G fest reserviert; gemessen reichen unter paralleler
+      # Last ~0,6 GB. Große Scans: CANTALOUPE_HEAP_MAX in .env erhöhen.
+      CANTALOUPE_HEAP_MIN: ${CANTALOUPE_HEAP_MIN:-256m}
+      CANTALOUPE_HEAP_MAX: ${CANTALOUPE_HEAP_MAX:-1g}
       CANTALOUPE_SOURCE_STATIC: FilesystemSource
       CANTALOUPE_FILESYSTEMSOURCE_LOOKUP_STRATEGY: BasicLookupStrategy
       CANTALOUPE_FILESYSTEMSOURCE_BASICLOOKUPSTRATEGY_PATH_PREFIX: /var/lib/cantaloupe/images/
