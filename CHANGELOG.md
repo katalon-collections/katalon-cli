@@ -2,7 +2,7 @@
 
 Format nach [Keep a Changelog](https://keepachangelog.com/de/1.1.0/). Nachträglich aus der Git-Historie erstellt; Versionen ohne eigenen Tag (0.1.1–0.1.3, 0.2.0) fehlen oder sind in der nächsten Version enthalten.
 
-## [Unreleased]
+## [0.3.5] – 2026-10-22
 
 ### Geändert
 - Cantaloupe ist fest auf `islandora/cantaloupe:7.0.22` gepinnt statt des beweglichen `:main`; ein `katalon update` konnte bisher unbemerkt eine andere Cantaloupe-Version ziehen. 7.0.22 enthält dieselbe Cantaloupe-Version (5.0.7) wie der zuletzt verteilte `main`-Stand.
