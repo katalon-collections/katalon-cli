@@ -42,7 +42,7 @@ services:
   # Legt den Derivat-Cache an und übergibt ihn dem Cantaloupe-User des Images.
   # Ändert nur Einträge mit falschem Eigentümer (idempotent, schnell bei vollem Cache).
   cantaloupe-cache-init:
-    image: islandora/cantaloupe:main
+    image: islandora/cantaloupe:7.0.22
     user: "0:0"
     entrypoint: ["sh", "-c", "mkdir -p /data/cache && find /data ! -user cantaloupe -exec chown cantaloupe:cantaloupe {} +"]
     volumes:
@@ -50,7 +50,7 @@ services:
     restart: "no"
 
   cantaloupe:
-    image: islandora/cantaloupe:main
+    image: islandora/cantaloupe:7.0.22
     restart: unless-stopped
     volumes:
       - ${MEDIA_ROOT:-./media}:/var/lib/cantaloupe/images:ro
@@ -80,6 +80,10 @@ services:
       # nach Sichtbarkeit (X-Media-Visibility aus /v1/media/_authorize).
       CANTALOUPE_CACHE_CLIENT_PUBLIC: "false"
       CANTALOUPE_CACHE_CLIENT_PRIVATE: "true"
+      # Das Image loggt ab Werk auf debug (mehrere Zeilen pro Bild und Healthcheck);
+      # Zugriffe protokolliert nginx bereits. Zur Fehlersuche CANTALOUPE_LOG_LEVEL=debug.
+      CANTALOUPE_LOG_APPLICATION_LEVEL: ${CANTALOUPE_LOG_LEVEL:-info}
+      CANTALOUPE_LOG_ACCESS_CONSOLEAPPENDER_ENABLED: "false"
     healthcheck:
       # Prüft neben der Erreichbarkeit, dass der Cantaloupe-Prozess in seinen Cache
       # schreiben kann — sonst liefert er Bilder mit 0 Bytes bei HTTP 200.

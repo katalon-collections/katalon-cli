@@ -2,6 +2,12 @@
 
 Format nach [Keep a Changelog](https://keepachangelog.com/de/1.1.0/). Nachträglich aus der Git-Historie erstellt; Versionen ohne eigenen Tag (0.1.1–0.1.3, 0.2.0) fehlen oder sind in der nächsten Version enthalten.
 
+## [Unreleased]
+
+### Geändert
+- Cantaloupe ist fest auf `islandora/cantaloupe:7.0.22` gepinnt statt des beweglichen `:main`; ein `katalon update` konnte bisher unbemerkt eine andere Cantaloupe-Version ziehen. 7.0.22 enthält dieselbe Cantaloupe-Version (5.0.7) wie der zuletzt verteilte `main`-Stand.
+- Cantaloupe loggt auf `info` statt des Image-Defaults `debug` (mehrere Zeilen pro Bildanfrage und Healthcheck, rund 30 MB am Tag auch ohne Last). Zur Fehlersuche `CANTALOUPE_LOG_LEVEL=debug` in `.env`. Das eigene Access-Log von Cantaloupe ist aus, Bildzugriffe stehen im nginx-Log.
+
 ## [0.3.4] – 2026-10-21
 
 ### Behoben

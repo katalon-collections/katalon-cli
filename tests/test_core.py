@@ -106,7 +106,7 @@ def test_render_compose_standalone_exposes_tls_ports():
     assert "ghcr.io/katalon-collections/katalon-worker:1.2.3" in yaml
     assert "ghcr.io/katalon-collections/katalon-admin:1.2.3" in yaml
     assert "ghcr.io/katalon-collections/katalon-portal:1.2.3" in yaml
-    assert "islandora/cantaloupe:main" in yaml
+    assert "islandora/cantaloupe:7.0.22" in yaml
     assert '"443:443"' in yaml
     assert "./certs:/etc/nginx/certs:ro" in yaml
 
@@ -961,3 +961,11 @@ def test_reload_nginx_tests_config_before_reload(tmp_path):
         with patch.object(docker, "compose", fake_ok):
             docker.reload_nginx(tmp_path)
         assert calls[-1] == ("exec", "-T", "nginx", "nginx", "-s", "reload")
+
+
+def test_render_compose_cantaloupe_pinned_and_quiet():
+    yaml = render_compose(version="1.2.3", base_url="https://x.example", tls_mode="none")
+    assert "islandora/cantaloupe:main" not in yaml
+    assert yaml.count("islandora/cantaloupe:7.0.22") == 2
+    assert "CANTALOUPE_LOG_APPLICATION_LEVEL: ${CANTALOUPE_LOG_LEVEL:-info}" in yaml
+    assert 'CANTALOUPE_LOG_ACCESS_CONSOLEAPPENDER_ENABLED: "false"' in yaml
