@@ -52,6 +52,27 @@ katalon start
 katalon status
 ```
 
+## Images der Fremdservices
+
+Welche Images Postgres, Redis, Elasticsearch, Cantaloupe, nginx und Caddy nutzen, legt das
+Katalon-Release fest (`images` in `katalon-release.json`), nicht die CLI. `install` und `update`
+schreiben sie in `compose.yaml`, `update` pullt sie mit. Releases ohne `images` (bis Katalon
+1.46.0) bekommen die Images, die bis katalon-cli 0.3.5 fest im Template standen.
+
+Vor einem Update vergleicht `katalon update` die wirksamen Images (inklusive
+`compose.override.yaml`) vor und nach dem Update, zeigt jeden Wechsel an und bricht ab, bevor
+etwas geändert wird, wenn
+
+- Postgres oder Elasticsearch die Major-Version wechseln würden (Postgres braucht dafür
+  Dump/Restore, Elasticsearch ein neues Datenverzeichnis und einen Reindex), oder
+- ein Postgres- oder Elasticsearch-Image die Anforderung des Releases (`requires`, z. B.
+  `>=8.13,<9`) nicht erfüllt, etwa ein eigenes Image aus `compose.override.yaml`. `requires`
+  gilt erst ab Releases mit `images`; ältere Releases nannten dort Werte, die nie geprüft wurden.
+
+`installation.json` merkt sich die Images je Version. `rollback` nimmt die der vorigen Version,
+behält aber ein neueres Elasticsearch derselben Major-Version, weil Elasticsearch ein
+Datenverzeichnis nicht mit einer älteren Version öffnet.
+
 ## API-Adresse
 
 Die REST-API liegt direkt unter der Base-URL, ohne `/api`-Präfix: `<KATALON_BASE_URL>/v1/...`
@@ -145,13 +166,14 @@ uv run pytest
   nach (`--yes` bricht dann ab), tragen neue optionale Variablen auskommentiert in `.env` ein und
   warnen vor veralteten Variablen, die noch in der `.env` stehen.
 - `core/compose_gen.py` + `templates/compose.yaml.j2` + `templates/nginx.conf.j2` — rendert `compose.yaml`
-  + `nginx.conf` und bei `tls_mode=caddy` das `Caddyfile` aus Version + TLS-Modus;
+  + `nginx.conf` und bei `tls_mode=caddy` das `Caddyfile` aus Version, Images + TLS-Modus;
   erzeugt bei `tls_mode=standalone` ein selbstsigniertes
   Zertifikat unter `<dir>/certs/` (eigenes Zertifikat dort ablegen, um es zu ersetzen).
   `install` fragt zusätzlich `MEDIA_ROOT` ab und legt `<dir>/compose.override.yaml.example` an
   (instanzspezifische Overrides — umbenennen zu `compose.override.yaml`, wird automatisch eingebunden
   und bei Updates nicht angefasst). Optionale Env-Vars (Admin-Login, SMTP, Geonames, …) landet
   auskommentiert in `.env`.
+- `core/images.py` — prüft die Images der Fremdservices vor einem Update (siehe „Images der Fremdservices“).
 - `core/backup.py` — `pg_dump` vor jedem Update; Rollback restauriert Dump statt `alembic downgrade`.
 - `core/docker.py` — dünner `docker compose`-Subprocess-Wrapper.
 - `main.py` — Typer-Commands, interaktive Teile über `rich.prompt`/`rich.progress`.

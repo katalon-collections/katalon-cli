@@ -18,6 +18,8 @@ class HistoryEntry(BaseModel):
     compose_revision: int
     action: str  # "install" | "update" | "rollback"
     at: datetime
+    # Images der Fremdservices aus dem Release (Rolle → Image); fehlt bei Einträgen vor katalon-cli 0.4.0.
+    images: dict[str, str] = Field(default_factory=dict)
 
 
 class InstallationState(BaseModel):
@@ -41,13 +43,16 @@ class InstallationState(BaseModel):
         path = instance_dir / STATE_FILENAME
         path.write_text(self.model_dump_json(indent=2))
 
-    def record(self, version: str, compose_revision: int, action: str) -> None:
+    def record(
+        self, version: str, compose_revision: int, action: str, images: dict[str, str] | None = None
+    ) -> None:
         self.history.append(
             HistoryEntry(
                 version=version,
                 compose_revision=compose_revision,
                 action=action,
                 at=datetime.now(timezone.utc),
+                images=images or {},
             )
         )
         self.version = version

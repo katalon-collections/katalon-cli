@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import shutil
 import subprocess
 import time
@@ -43,6 +44,23 @@ def compose(
         text=True,
         capture_output=capture,
     )
+
+
+def config_images(instance_dir: Path, compose_file: Path | None = None) -> dict[str, str]:
+    """Images je Service, wie Compose sie startet (inkl. compose.override.yaml)."""
+    files = ["-f", str(compose_file or instance_dir / "compose.yaml")]
+    override = instance_dir / "compose.override.yaml"
+    if override.exists():
+        files += ["-f", str(override)]
+    result = subprocess.run(
+        [*compose_command(), "--project-directory", str(instance_dir), *files, "config", "--format", "json"],
+        cwd=instance_dir,
+        check=True,
+        text=True,
+        capture_output=True,
+    )
+    services = json.loads(result.stdout).get("services", {})
+    return {name: svc["image"] for name, svc in services.items() if svc.get("image")}
 
 
 def reload_nginx(instance_dir: Path) -> None:

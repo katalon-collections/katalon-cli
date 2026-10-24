@@ -971,3 +971,140 @@ def test_render_compose_cantaloupe_pinned_and_quiet():
     assert 'CANTALOUPE_LOG_ACCESS_CONSOLEAPPENDER_ENABLED: "false"' in yaml
     assert "CANTALOUPE_HEAP_MIN: ${CANTALOUPE_HEAP_MIN:-256m}" in yaml
     assert "CANTALOUPE_HEAP_MAX: ${CANTALOUPE_HEAP_MAX:-1g}" in yaml
+
+
+def test_release_metadata_images_default_to_pre_release_state():
+    from katalon_cli.core.release import ReleaseImages, ReleaseMetadata
+
+    base = {
+        "version": "1.46.0",
+        "minimum_installer_version": "0.3.0",
+        "migration_required": False,
+        "breaking": False,
+        "compose_revision": 3,
+    }
+    legacy = ReleaseMetadata.model_validate({**base, "requires": {"elasticsearch": ">=8.15,<9"}})
+    assert legacy.service_images == ReleaseImages()
+    assert legacy.checked_requires.elasticsearch is None
+    meta = ReleaseMetadata.model_validate(
+        {**base, "images": {"elasticsearch": "docker.elastic.co/elasticsearch/elasticsearch:8.19.2"}}
+    )
+    assert meta.images.elasticsearch.endswith(":8.19.2")
+    assert meta.images.postgres == "postgis/postgis:16-3.4"
+    assert ReleaseMetadata.model_validate(
+        {**base, "images": {}, "requires": {"elasticsearch": ">=8.13,<9"}}
+    ).checked_requires.elasticsearch == ">=8.13,<9"
+
+
+def test_render_compose_uses_release_images():
+    from katalon_cli.core.release import ReleaseImages
+
+    images = ReleaseImages(
+        elasticsearch="docker.elastic.co/elasticsearch/elasticsearch:8.19.2",
+        cantaloupe="islandora/cantaloupe:7.0.23",
+        caddy="caddy:2.10-alpine",
+    )
+    out = render_compose(version="1.47.0", base_url="https://example.org", tls_mode="caddy", images=images)
+    assert "image: docker.elastic.co/elasticsearch/elasticsearch:8.19.2" in out
+    assert out.count("image: islandora/cantaloupe:7.0.23") == 2
+    assert "image: caddy:2.10-alpine" in out
+    assert "image: postgis/postgis:16-3.4" in out
+    default = render_compose(version="1.47.0", base_url="http://localhost", tls_mode="none")
+    assert "image: docker.elastic.co/elasticsearch/elasticsearch:8.13.4" in default
+
+
+def test_image_version_and_requirements():
+    from katalon_cli.core.images import image_version, satisfies
+
+    assert image_version("postgis/postgis:16-3.4") == (16,)
+    assert image_version("docker.elastic.co/elasticsearch/elasticsearch:8.13.4") == (8, 13, 4)
+    assert image_version("localhost:5000/es") is None
+    assert image_version("redis:alpine") is None
+    assert satisfies((8, 13, 4), ">=8.13,<9")
+    assert not satisfies((8, 12, 0), ">=8.13,<9")
+    assert not satisfies((9, 0, 0), ">=8.13,<9")
+    assert satisfies((16,), ">=16,<17")
+    with pytest.raises(ValueError):
+        satisfies((8,), "~=8.13")
+
+
+def test_update_problems_blocks_major_change_and_unmet_requirement():
+    from katalon_cli.core.images import update_problems
+    from katalon_cli.core.release import ReleaseRequirements
+
+    requires = ReleaseRequirements(postgres=">=16,<18", elasticsearch=">=8.13,<10")
+    current = {"db": "postgis/postgis:16-3.4", "elasticsearch": "elasticsearch:8.13.4"}
+
+    errors, notes = update_problems(current, {**current, "elasticsearch": "elasticsearch:8.19.2"}, requires)
+    assert errors == [] and notes == []
+
+    errors, _ = update_problems(current, {**current, "db": "postgis/postgis:17-3.5"}, requires)
+    assert len(errors) == 1 and "Major-Wechsel" in errors[0]
+
+    errors, _ = update_problems(
+        current, {**current, "elasticsearch": "elasticsearch:8.12.0"},
+        ReleaseRequirements(elasticsearch=">=8.13,<9"),
+    )
+    assert len(errors) == 1 and ">=8.13,<9" in errors[0]
+
+    errors, notes = update_problems(current, {**current, "elasticsearch": "my-es:latest"}, requires)
+    assert errors == [] and len(notes) == 1
+
+
+def test_rollback_keeps_newer_elasticsearch_of_same_major():
+    from katalon_cli.core.images import rollback_images
+    from katalon_cli.core.release import ReleaseImages
+
+    old = ReleaseImages(cantaloupe="islandora/cantaloupe:7.0.21")
+    new = ReleaseImages(elasticsearch="elasticsearch:8.19.2", cantaloupe="islandora/cantaloupe:7.0.22")
+    images = rollback_images(new, old)
+    assert images.elasticsearch == "elasticsearch:8.19.2"
+    assert images.cantaloupe == "islandora/cantaloupe:7.0.21"
+    assert rollback_images(old, old) == old
+
+
+def test_state_history_records_images_and_loads_old_entries(tmp_path: Path):
+    (tmp_path / "installation.json").write_text(
+        '{"version": "1.44.0", "compose_revision": 3, "base_url": "http://localhost", "tls_mode": "none",'
+        ' "installed_at": "2026-10-12T04:04:14Z", "history": [{"version": "1.44.0",'
+        ' "compose_revision": 3, "action": "install", "at": "2026-10-12T04:04:14Z"}]}'
+    )
+    state = InstallationState.load(tmp_path)
+    assert state.history[0].images == {}
+    state.record("1.47.0", 3, "update", images={"elasticsearch": "elasticsearch:8.19.2"})
+    state.save(tmp_path)
+    assert InstallationState.load(tmp_path).history[-1].images == {"elasticsearch": "elasticsearch:8.19.2"}
+
+
+def test_check_update_images_aborts_before_any_change(tmp_path: Path, monkeypatch):
+    import typer
+
+    from katalon_cli import main
+    from katalon_cli.core.release import ReleaseImages, ReleaseMetadata
+
+    state = InstallationState(
+        version="1.46.0", compose_revision=3, base_url="http://localhost", tls_mode="none",
+        installed_at=datetime.now(UTC),
+    )
+    meta = ReleaseMetadata(
+        version="1.47.0", minimum_installer_version="0.4.0", migration_required=False, breaking=False,
+        compose_revision=3, images=ReleaseImages(postgres="postgis/postgis:17-3.5"),
+    )
+    seen: list[str] = []
+
+    def fake_config_images(_dir, compose_file=None):
+        if compose_file is None:
+            return {"db": "postgis/postgis:16-3.4"}
+        seen.append(compose_file.read_text())
+        return {"db": "postgis/postgis:17-3.5"}
+
+    monkeypatch.setattr(main.docker, "config_images", fake_config_images)
+    with pytest.raises(typer.Exit):
+        main._check_update_images(tmp_path, state, meta)
+    assert "postgis/postgis:17-3.5" in seen[0]
+    assert not (tmp_path / "compose.yaml.next").exists()
+    assert not (tmp_path / "compose.yaml").exists()
+
+    meta.images = None
+    monkeypatch.setattr(main.docker, "config_images", lambda _dir, compose_file=None: {"db": "postgis/postgis:16-3.4"})
+    main._check_update_images(tmp_path, state, meta)

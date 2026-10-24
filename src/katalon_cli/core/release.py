@@ -13,6 +13,20 @@ class ReleaseRequirements(BaseModel):
     elasticsearch: str | None = None
 
 
+class ReleaseImages(BaseModel):
+    """Images der Fremdservices, die das Katalon-Release festlegt (`images` in katalon-release.json).
+
+    Die Defaults sind der Stand der Releases vor diesem Feld (bis Katalon 1.46.0) und
+    bleiben deshalb unverändert; neue Versionen kommen über das Release, nicht hierher."""
+
+    postgres: str = "postgis/postgis:16-3.4"
+    redis: str = "redis:7-alpine"
+    elasticsearch: str = "docker.elastic.co/elasticsearch/elasticsearch:8.13.4"
+    cantaloupe: str = "islandora/cantaloupe:7.0.22"
+    nginx: str = "nginx:alpine"
+    caddy: str = "caddy:2-alpine"
+
+
 class ReleaseEnvVar(BaseModel):
     """Neu hinzugekommene Umgebungsvariable eines Releases (katalon-release.json)."""
 
@@ -38,9 +52,21 @@ class ReleaseMetadata(BaseModel):
     reindex_required: bool = False
     breaking: bool
     compose_revision: int
+    # Fehlt bei Releases bis Katalon 1.46.0; dort galten die Images des Templates.
+    images: ReleaseImages | None = None
     requires: ReleaseRequirements = ReleaseRequirements()
     env_vars: list[ReleaseEnvVar] = Field(default_factory=list)
     deprecated_env_vars: list[DeprecatedEnvVar] = Field(default_factory=list)
+
+    @property
+    def service_images(self) -> ReleaseImages:
+        return self.images or ReleaseImages()
+
+    @property
+    def checked_requires(self) -> ReleaseRequirements:
+        """`requires` gilt erst ab Releases mit `images`; davor prüfte es niemand, und der
+        Wert war nicht verlässlich (1.46.0 nennt Elasticsearch >=8.15, läuft aber mit 8.13.4)."""
+        return self.requires if self.images else ReleaseRequirements()
 
 
 def _fetch_release_asset(tag: str | None) -> dict:

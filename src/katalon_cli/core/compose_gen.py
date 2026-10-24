@@ -1,4 +1,4 @@
-"""Rendert compose.yaml + nginx.conf aus Template + Release-Version + TLS-Modus."""
+"""Rendert compose.yaml + nginx.conf aus Template + Release (Version, Images) + TLS-Modus."""
 
 from __future__ import annotations
 
@@ -9,6 +9,8 @@ from pathlib import Path
 from urllib.parse import urlparse
 
 from jinja2 import Environment, PackageLoader, select_autoescape
+
+from .release import ReleaseImages
 
 _env = Environment(
     loader=PackageLoader("katalon_cli", "templates"),
@@ -23,6 +25,7 @@ def render_compose(
     version: str,
     base_url: str,
     tls_mode: str,
+    images: ReleaseImages | None = None,
     registry: str = "ghcr.io/katalon-collections/katalon",
 ) -> str:
     if tls_mode == "caddy":
@@ -34,6 +37,7 @@ def render_compose(
         base_url=base_url,
         tls_mode=tls_mode,
         registry=registry,
+        images=images or ReleaseImages(),
         port=parsed_port,
     )
 

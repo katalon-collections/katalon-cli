@@ -29,8 +29,9 @@ from rich.table import Table
 
 from .core import backup as backup_mod
 from .core import checks, docker, permissions, release, selfupdate
+from .core import images as images_mod
 from .core import reindex as reindex_mod
-from .core.compose_gen import caddy_host, write_compose
+from .core.compose_gen import caddy_host, render_compose, write_compose
 from .core.paths import default_instance_dir, save_instance_dir
 from .core.state import InstallationState, instance_dir_or_raise
 
@@ -369,7 +370,7 @@ def install(
         progress.add_task("Schreibe compose.yaml + .env …", total=None)
         dir.mkdir(parents=True, exist_ok=True)
         Path(media_root).mkdir(parents=True, exist_ok=True)
-        write_compose(dir, version=meta.version, base_url=base_url, tls_mode=tls_mode)
+        write_compose(dir, version=meta.version, base_url=base_url, tls_mode=tls_mode, images=meta.service_images)
 
         _ensure_env_vars(dir, base_url, media_root=media_root, release_env_vars=meta.env_vars, provided=provided)
         _write_override_example(dir)
@@ -381,7 +382,7 @@ def install(
             tls_mode=tls_mode,
             installed_at=datetime.now(timezone.utc),
         )
-        state.record(meta.version, meta.compose_revision, "install")
+        state.record(meta.version, meta.compose_revision, "install", images=meta.service_images.model_dump())
         state.save(dir)
 
     save_instance_dir(dir)
@@ -454,6 +455,40 @@ def _media_root(dir: Path) -> str:
     value = _env_value(dir, "MEDIA_ROOT") or "./media"
     path = Path(value)
     return str(path if path.is_absolute() else dir / path)
+
+
+def _check_update_images(dir: Path, state: InstallationState, meta: release.ReleaseMetadata) -> None:
+    """Zeigt, welche Fremdservice-Images das Update wechselt, und bricht ab, wenn eins nicht passt.
+
+    Verglichen werden die wirksamen Images (inkl. compose.override.yaml) vor und nach dem
+    Update, damit auch ein eigenes Image aus dem Override gegen `requires` geprüft wird."""
+    preview = dir / "compose.yaml.next"
+    try:
+        preview.write_text(
+            render_compose(
+                version=meta.version, base_url=state.base_url, tls_mode=state.tls_mode, images=meta.service_images
+            )
+        )
+        current = docker.config_images(dir)
+        target = docker.config_images(dir, preview)
+    except (docker.DockerError, subprocess.CalledProcessError, ValueError) as exc:
+        console.print(f"[yellow]⚠ Images der Fremdservices nicht prüfbar: {exc}[/]")
+        return
+    finally:
+        preview.unlink(missing_ok=True)
+
+    for service in sorted(target):
+        old, new = current.get(service), target[service]
+        if old and old != new and "katalon-collections/katalon-" not in new:
+            console.print(f"[yellow]⚠ {service}: {old} → {new}[/]")
+    errors, notes = images_mod.update_problems(current, target, meta.checked_requires)
+    for note in notes:
+        console.print(f"[yellow]⚠ {note}[/]")
+    if errors:
+        for error in errors:
+            console.print(f"[red]✖ {error}[/]")
+        console.print("[red]Update abgebrochen, nichts geändert.[/]")
+        raise typer.Exit(1)
 
 
 def _require_installer_version(minimum: str) -> None:
@@ -730,6 +765,8 @@ def update(
             f"(Revision {state.compose_revision} → {meta.compose_revision})[/]"
         )
 
+    _check_update_images(dir, state, meta)
+
     env_existing = _parse_env_file((dir / ".env").read_text() if (dir / ".env").exists() else "")
     _print_new_env_vars(env_existing, env_vars)
     _print_deprecated_env_vars(env_existing, deprecated_env_vars)
@@ -749,7 +786,9 @@ def update(
         ),
         (
             "compose.yaml rendern",
-            lambda: write_compose(dir, version=meta.version, base_url=state.base_url, tls_mode=state.tls_mode),
+            lambda: write_compose(
+                dir, version=meta.version, base_url=state.base_url, tls_mode=state.tls_mode, images=meta.service_images
+            ),
         ),
         ("Images pullen", lambda: docker.compose(dir, "pull")),
         ("Medienrechte prüfen", lambda: _ensure_media_permissions(dir)),
@@ -782,7 +821,7 @@ def update(
         console.print("[red]✖ Healthcheck fehlgeschlagen — `katalon rollback` erwägen.[/]")
         raise typer.Exit(1)
 
-    state.record(meta.version, meta.compose_revision, "update")
+    state.record(meta.version, meta.compose_revision, "update", images=meta.service_images.model_dump())
     state.save(dir)
     console.print(f"[green]✔[/] Update auf {meta.version} abgeschlossen.")
 
@@ -840,7 +879,12 @@ def rollback(
         )
 
     if previous:
-        write_compose(dir, version=previous.version, base_url=state.base_url, tls_mode=state.tls_mode)
+        images = images_mod.rollback_images(
+            release.ReleaseImages(**state.history[-1].images), release.ReleaseImages(**previous.images)
+        )
+        write_compose(
+            dir, version=previous.version, base_url=state.base_url, tls_mode=state.tls_mode, images=images
+        )
         docker.compose(dir, "pull")
 
     _ensure_media_permissions(dir)

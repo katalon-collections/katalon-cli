@@ -2,6 +2,15 @@
 
 Format nach [Keep a Changelog](https://keepachangelog.com/de/1.1.0/). Nachträglich aus der Git-Historie erstellt; Versionen ohne eigenen Tag (0.1.1–0.1.3, 0.2.0) fehlen oder sind in der nächsten Version enthalten.
 
+## [0.4.0] – 2026-10-24
+
+### Geändert
+- Die Images von Postgres, Redis, Elasticsearch, Cantaloupe, nginx und Caddy kommen aus dem Katalon-Release (`images` in `katalon-release.json`) statt fest aus dem Template. Ein Katalon-Release kann so eine neue Elasticsearch- oder Cantaloupe-Version mitbringen, ohne dass dafür eine neue CLI nötig ist. Releases ohne `images` erhalten die bisherigen Images.
+
+### Hinzugefügt
+- `katalon update` zeigt, welche Fremdservice-Images das Update wechselt, und bricht vor jeder Änderung ab, wenn Postgres oder Elasticsearch die Major-Version wechseln würden oder ein Image (auch aus `compose.override.yaml`) die Anforderung `requires` des Releases nicht erfüllt. Bisher las die CLI `requires`, prüfte es aber nicht; geprüft wird es erst bei Releases mit `images`, weil ältere Werte nicht verlässlich sind.
+- `installation.json` speichert die Images je Version; `katalon rollback` stellt die Images der vorigen Version wieder her und behält ein neueres Elasticsearch derselben Major-Version.
+
 ## [0.3.5] – 2026-10-22
 
 ### Geändert
