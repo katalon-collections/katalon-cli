@@ -2,7 +2,7 @@
 
 Format nach [Keep a Changelog](https://keepachangelog.com/de/1.1.0/). Nachträglich aus der Git-Historie erstellt; Versionen ohne eigenen Tag (0.1.1–0.1.3, 0.2.0) fehlen oder sind in der nächsten Version enthalten.
 
-## [Unveröffentlicht]
+## [0.5.1] – 2026-11-11
 
 ### Behoben
 - Die Server-Disk-Prüfung von `katalon update` und `katalon reindex` misst die Belegung jetzt im Elasticsearch-Container (`df` auf dem Datenpfad) statt auf dem Host. Auf macOS meldete sie fälschlich 90 %, weil `/` dort das Daten-Volume des Macs zeigt, nicht die Docker-VM. Läuft Elasticsearch nicht, überspringt sie die Prüfung.
