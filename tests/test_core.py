@@ -138,7 +138,8 @@ def test_caddy_config_survives_regeneration(tmp_path):
         cert.assert_not_called()
     conf = (tmp_path / "nginx.conf").read_text()
     assert "listen 443" not in conf
-    assert conf.count("proxy_set_header X-Forwarded-Proto $http_x_forwarded_proto;") == 6
+    # 7 proxied locations: /api/, /v1/ + attachments, /portal/v1/, /health, /oai, /ark:/.
+    assert conf.count("proxy_set_header X-Forwarded-Proto $http_x_forwarded_proto;") == 7
 
 
 @pytest.mark.parametrize("url", [
@@ -217,6 +218,25 @@ def test_render_compose_worker_and_beat_have_elasticsearch_url():
     assert "ELASTICSEARCH_URL: ${ELASTICSEARCH_URL:-http://elasticsearch:9200}" in beat_block
 
 
+def test_render_compose_api_and_worker_pass_attachment_upload_limit():
+    # Optional var from Katalon's compose: passed explicitly with default 200 so api and
+    # worker agree on the attachment upload limit.
+    yaml = render_compose(version="1.2.3", base_url="http://localhost", tls_mode="none")
+    api_block = yaml.split("\n  api:")[1].split("\n  worker:")[0]
+    worker_block = yaml.split("\n  worker:")[1].split("\n  beat:")[0]
+    line = "ATTACHMENT_MAX_UPLOAD_MB: ${ATTACHMENT_MAX_UPLOAD_MB:-200}"
+    assert line in api_block
+    assert line in worker_block
+
+
+def test_ensure_env_vars_new_install_mentions_attachment_upload_limit(tmp_path: Path):
+    from katalon_cli.main import _ensure_env_vars
+
+    _ensure_env_vars(tmp_path, "http://localhost")
+    raw = (tmp_path / ".env").read_text()
+    assert "# ATTACHMENT_MAX_UPLOAD_MB=200" in raw.splitlines()
+
+
 def test_render_compose_behind_proxy_binds_loopback():
     yaml = render_compose(version="1.2.3", base_url="https://x.example", tls_mode="behind-proxy")
     assert "127.0.0.1:8080:80" in yaml
@@ -238,7 +258,8 @@ def test_render_nginx_conf_has_absolute_redirect_off():
 
     conf = render_nginx_conf(tls_mode="none")
     assert "absolute_redirect off;" in conf
-    assert conf.count("proxy_set_header X-Forwarded-Proto $scheme;") == 6
+    # 7 proxied locations: /api/, /v1/ + attachments, /portal/v1/, /health, /oai, /ark:/.
+    assert conf.count("proxy_set_header X-Forwarded-Proto $scheme;") == 7
 
 def test_state_roundtrip_and_history(tmp_path: Path):
     state = InstallationState(
@@ -864,6 +885,26 @@ def test_render_nginx_conf_sets_iiif_cache_control_by_visibility():
     assert 'add_header X-Content-Type-Options "nosniff" always;' in iiif
 
 
+def test_render_nginx_conf_attachment_location_skips_page_csp():
+    import re
+
+    from katalon_cli.core.compose_gen import render_nginx_conf
+
+    conf = render_nginx_conf(tls_mode="none")
+    start = conf.index('location ~ "^/(portal/)?v1/(attachments/')
+    attachments = conf[start : conf.index("\n    }\n", start)]
+    # Comments above the block name the omitted headers; check directives only.
+    directives = re.sub(r"#[^\n]*", "", attachments)
+    assert "(attachments/[0-9a-fA-F-]{36}/(file|stream)|objects/[0-9a-fA-F-]{36}/media/" in attachments
+    assert "media/[0-9a-fA-F-]{36}/(file|download))$\" {" in attachments
+    assert "proxy_pass http://$upstream_api;" in directives
+    assert "proxy_pass http://$upstream_api/" not in directives  # no URI part in regex locations
+    assert "Content-Security-Policy" not in directives
+    assert "X-Content-Type-Options" not in directives
+    assert 'add_header X-Frame-Options "SAMEORIGIN" always;' in directives
+    assert conf.index("location ~ \"^/(portal/)?v1/(attachments/") < conf.index("location /v1/ {")
+
+
 def test_render_compose_cantaloupe_never_public_by_itself():
     yaml = render_compose(version="1.2.3", base_url="http://localhost", tls_mode="none")
     assert 'CANTALOUPE_CACHE_CLIENT_PUBLIC: "false"' in yaml
@@ -893,6 +934,9 @@ def test_nginx_template_blocks_keep_inherited_security_headers(tls_mode):
         else:
             node = stack.pop()
             missing = set(node["inherited"]) - set(node["headers"]) if node["headers"] else set()
+            if node["name"].startswith('location ~ "^/(portal/)?v1/(attachments/'):
+                # Attachment and media files: API sets CSP and nosniff itself (see nginx.conf.j2).
+                missing -= {"content-security-policy", "x-content-type-options"}
             if missing:
                 problems.append((node["name"], sorted(missing)))
         pos = match.end()

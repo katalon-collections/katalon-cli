@@ -2,6 +2,14 @@
 
 Format nach [Keep a Changelog](https://keepachangelog.com/de/1.1.0/). Nachträglich aus der Git-Historie erstellt; Versionen ohne eigenen Tag (0.1.1–0.1.3, 0.2.0) fehlen oder sind in der nächsten Version enthalten.
 
+## [0.5.0] – 2026-11-11
+
+### Hinzugefügt
+- `ATTACHMENT_MAX_UPLOAD_MB` (Standard 200) begrenzt die Größe von Dateianhängen (Feldtyp "Datei"), getrennt von `MAX_UPLOAD_SIZE_MB`. Die `compose.yaml` übergibt die Variable an `api` und `worker`; neue Installationen tragen sie auskommentiert in `.env` ein.
+
+### Behoben
+- Dateianhänge und Mediendateien bekommen in der nginx-Konfiguration nicht mehr die Seiten-CSP des Servers. Sie setzt die API pro Dateityp selbst; die doppelte Seiten-CSP blockierte den integrierten PDF-Viewer des Browsers.
+
 ## [0.4.0] – 2026-10-24
 
 ### Geändert

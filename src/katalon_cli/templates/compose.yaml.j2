@@ -109,6 +109,7 @@ services:
       CANTALOUPE_URL: ${CANTALOUPE_URL:-http://cantaloupe:8182}
       CANTALOUPE_PUBLIC_URL: ${CANTALOUPE_PUBLIC_URL:-http://localhost}
       MEDIA_ROOT: /var/lib/katalon/media
+      ATTACHMENT_MAX_UPLOAD_MB: ${ATTACHMENT_MAX_UPLOAD_MB:-200}
       FIRST_RUN_CREDENTIALS_PATH: ${FIRST_RUN_CREDENTIALS_PATH:-/var/lib/katalon/first-run-credentials.txt}
       DEBUG: "false"
     volumes:
@@ -136,6 +137,7 @@ services:
       CANTALOUPE_URL: ${CANTALOUPE_URL:-http://cantaloupe:8182}
       CANTALOUPE_PUBLIC_URL: ${CANTALOUPE_PUBLIC_URL:-http://localhost}
       MEDIA_ROOT: /var/lib/katalon/media
+      ATTACHMENT_MAX_UPLOAD_MB: ${ATTACHMENT_MAX_UPLOAD_MB:-200}
     volumes:
       - ${MEDIA_ROOT:-./media}:/var/lib/katalon/media
     depends_on:
