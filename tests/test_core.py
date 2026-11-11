@@ -968,18 +968,19 @@ def test_render_nginx_conf_hides_version_and_sets_transport_headers(tls_mode):
     assert 'add_header Cross-Origin-Resource-Policy "cross-origin" always;' in iiif
 
 
-def test_check_server_disk_flags_full_mount(monkeypatch, tmp_path):
-    from collections import namedtuple
+def test_check_server_disk_reads_es_container_df(monkeypatch, tmp_path):
+    from types import SimpleNamespace
 
     from katalon_cli.core import checks
 
-    usage = namedtuple("usage", "total used free")
-    monkeypatch.setattr(checks, "_mount_points", lambda _d: [tmp_path, Path("/data")])
-    monkeypatch.setattr(
-        checks.shutil, "disk_usage", lambda p: usage(100, 92, 8) if str(p) == "/data" else usage(100, 10, 90)
-    )
-    result = checks.check_server_disk(tmp_path)
-    assert not result.ok and "/data 92 %" in result.detail and str(tmp_path) not in result.detail
+    df = "Filesystem 1024-blocks Used Available Capacity Mounted on\n/dev/vdb1 100 {u} 8 {u}% /data\n"
+    monkeypatch.setattr(checks.docker, "is_running", lambda *_: True)
+    monkeypatch.setattr(checks.docker, "compose", lambda *_a, **_k: SimpleNamespace(stdout=df.format(u=92)))
+    assert not checks.check_server_disk(tmp_path).ok
+    monkeypatch.setattr(checks.docker, "compose", lambda *_a, **_k: SimpleNamespace(stdout=df.format(u=35)))
+    assert checks.check_server_disk(tmp_path).ok
+    monkeypatch.setattr(checks.docker, "is_running", lambda *_: False)
+    assert checks.check_server_disk(tmp_path).ok
 
 
 def test_reload_nginx_tests_config_before_reload(tmp_path):

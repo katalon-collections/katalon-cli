@@ -8,10 +8,11 @@ import subprocess
 from dataclasses import dataclass
 from pathlib import Path
 
+from . import docker
+
 MIN_FREE_DISK_GB = 5
 # Elasticsearch verweigert Shard-Allokation ab 90 % (high watermark).
 MAX_USED_PERCENT = 90
-REAL_FS = {"ext2", "ext3", "ext4", "xfs", "btrfs", "zfs", "f2fs"}
 
 
 @dataclass
@@ -52,30 +53,25 @@ def check_disk_space(path: Path, min_gb: int = MIN_FREE_DISK_GB) -> CheckResult:
         "Diskspace", ok, f"{free_gb:.1f} GB frei (min. {min_gb} GB) in {path}"
     )
 
-def _mount_points(instance_dir: Path) -> list[Path]:
-    """Alle echten Dateisysteme des Hosts; ohne /proc/mounts Instanzverzeichnis und `/`."""
-    try:
-        lines = Path("/proc/mounts").read_text().splitlines()
-    except OSError:
-        return [instance_dir, Path("/")]
-    return [Path(f[1].replace("\\040", " ")) for f in map(str.split, lines) if f[2] in REAL_FS]
+ES_DATA_PATH = "/usr/share/elasticsearch/data"
 
 
 def check_server_disk(instance_dir: Path, max_used: int = MAX_USED_PERCENT) -> CheckResult:
-    full = []
-    for mount in _mount_points(instance_dir):
-        try:
-            usage = shutil.disk_usage(mount)
-        except OSError:
-            continue
-        used = usage.used * 100 / (usage.used + usage.free)
-        if used >= max_used:
-            full.append(f"{mount} {used:.0f} %")
-    if full:
+    """Belegung des Dateisystems mit dem Elasticsearch-Datenpfad, gemessen im Container (auch Docker Desktop)."""
+    if not docker.is_running(instance_dir, "elasticsearch"):
+        return CheckResult("Server-Disk", True, "Elasticsearch läuft nicht — Prüfung übersprungen")
+    result = docker.compose(
+        instance_dir, "exec", "-T", "elasticsearch", "df", "-Pk", ES_DATA_PATH, check=False, capture=True
+    )
+    try:
+        used = int(result.stdout.splitlines()[-1].split()[4].rstrip("%"))
+    except (IndexError, ValueError):
+        return CheckResult("Server-Disk", True, "Belegung nicht lesbar — Prüfung übersprungen")
+    if used >= max_used:
         return CheckResult(
-            "Server-Disk", False, f"≥ {max_used} % belegt: {', '.join(full)} — Elasticsearch blockiert ab 90 %"
+            "Server-Disk", False, f"Elasticsearch-Daten {used} % belegt (≥ {max_used} %) — Elasticsearch blockiert ab 90 %"
         )
-    return CheckResult("Server-Disk", True, f"alle Dateisysteme < {max_used} % belegt")
+    return CheckResult("Server-Disk", True, f"Elasticsearch-Daten {used} % belegt (< {max_used} %)")
 
 
 def check_openssl() -> CheckResult:
